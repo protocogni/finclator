@@ -73,7 +73,8 @@ td.stale{color:#f0b64c}
 @media (max-width:700px){main{padding:10px}.card{min-width:0;flex:1 1 44%}
 .grid{width:100%;table-layout:fixed}.grid td{width:auto;min-width:0;height:auto;padding:5px 2px;font-size:11px;white-space:normal;overflow-wrap:anywhere}
 .grid td small{font-size:9px;white-space:normal;display:block}.grid th{font-size:11px;padding:3px 2px;white-space:normal}.grid td:first-child,.grid th:first-child{width:38px}
-.tw{width:100%}table{font-size:12px}th,td{padding:3px 5px}nav span[style]{display:none}}
+.tw{width:100%}table{font-size:12px}th,td{padding:3px 5px}nav span[style]{display:none}
+.fm td.f,.fm td:first-child{white-space:normal}}
 """
 
 JS = """
@@ -165,7 +166,7 @@ def _page(title: str, body: str, active: str) -> str:
     tabs = [("/", "Progress"), ("/matrix", "Matrix"), ("/accounts", "Accounts"), ("/audit", "Audit"),
             ("/architecture", "Architecture"), ("/tables", "Tables"), ("/api/status", "JSON")]
     nav = "".join(f"<a href='{_u(h)}' class='{'on' if h == active else ''}'>{t}</a>" for h, t in tabs)
-    live = ch.get("refresh", True) and active not in ("/tables", "/audit")
+    live = ch.get("refresh", True) and active not in ("/tables", "/audit", "/matrix")
     refresh = f"<meta http-equiv=refresh content={60 if active == '/' else 30}>" if live else ""
     mode = ("page 60s · log live 3s" if active == "/" else "auto-refresh 30s") if live else "no auto-refresh"
     who = ch.get("who", "")
@@ -342,11 +343,12 @@ def page_matrix(conn) -> str:
              "<tr><td>vote</td><td class=f>latest call per account in the window</td><td>earlier repeats by the same account are ignored, so a prolific "
              "poster cannot outvote quieter accounts. Window = 90 / 365 / 730 d for SHORT / MEDIUM / LONG.</td></tr>"
              "<tr><td>accts · calls</td><td class=f>votes · all calls in the window</td><td>the gap between the two is how much repetition was collapsed.</td></tr>"
-             "<tr><td>w</td><td class=f>Σ trust × confidence × 2<sup>−age/(window/3)</sup></td><td>total weight of the votes; each vote is the account's "
-             "trust in that cell × classifier confidence × recency (halves every third of the window).</td></tr>"
+             "<tr><td>w</td><td class=f>Σ trust × √confidence × 2<sup>−age/(window/3)</sup></td><td>total weight of the votes; each vote is the account's "
+             "trust in that cell × √(classifier confidence) × recency (halves every third of the window).</td></tr>"
              "<tr><td>net</td><td class=f>(Σw<sub>BUY</sub> − Σw<sub>SELL</sub>) / w</td><td>−1 … +1.</td></tr>"
              f"<tr><td>label</td><td class=f>BUY &gt; +{matrix.NEUTRAL_BAND} · SELL &lt; −{matrix.NEUTRAL_BAND} · else NEUTRAL</td>"
-             f"<td>N/A when w &lt; {matrix.MIN_WEIGHT} — too little weighted evidence.</td></tr>"
+             f"<td>N/A when w &lt; {matrix.MIN_WEIGHT} or fewer than {matrix.MIN_ACCOUNTS} accounts voted — too little evidence "
+             "(the same gate applies to each school sub-label).</td></tr>"
              "<tr><td>top</td><td class=f>max vote / w</td><td>the largest single account's share; amber ≥ 50 % means one account is carrying the "
              "cell — that is its view, not a consensus.</td></tr></table>")
 
@@ -371,7 +373,7 @@ def page_matrix(conn) -> str:
 
     B.append("<h2>Contributors per cell</h2><table class=fm>"
              "<tr><td>rows</td><td class=f>15 heaviest votes</td><td>one row per account — its latest call in the window.</td></tr>"
-             "<tr><td>weight</td><td class=f>trust × confidence × recency</td><td>the vote's share of the cell; the same number the matrix sums.</td></tr>"
+             "<tr><td>weight</td><td class=f>trust × √confidence × recency</td><td>the vote's share of the cell; the same number the matrix sums.</td></tr>"
              "<tr><td>header</td><td class=f>label (accounts, calls) · school sub-labels</td><td>each school's own reading from its members' votes.</td></tr></table>")
     for a in ASSETS:
         for h in HORIZONS:
@@ -453,7 +455,8 @@ def page_accounts(conn) -> str:
     B = [f"<h2>Trust per account × asset × horizon <small>· model {e(model)}</small></h2>",
          "<p class=help>Each account is scored separately per asset and horizon; the matrix weights a call by the score of the cell it lands in, "
          "never by one number per account. Cell = shrunk hit rate <b>(hits + 5) / (n + 10)</b> over matured calls (SHORT 90d, MEDIUM 365d, LONG 730d); "
-         "hits: CORRECT=1, PARTIAL=0.5, WRONG=0, ±0.25 when a stated price target hit/missed. Rows = asset, columns = horizon; "
+         "hits: CORRECT=1, PARTIAL=0.5 (called a move, market flat), WRONG=0 (opposite move, or NEUTRAL and a big move), ±0.25 when a stated "
+         "price target hit/missed (wrong-side and unit-error targets ignored). Rows = asset, columns = horizon; "
          "the right column pools each asset over all horizons, the bottom row pools each horizon over all assets, the corner pools "
          "everything. Click an account in the ranking to jump to and highlight its grid. Grey = no matured outcome → the 0.5 prior is used, and the matrix falls back specific → asset → overall → 0.5. "
          "Colour: red ≤0.3 · neutral 0.5 · green ≥0.7.</p>",
@@ -503,7 +506,7 @@ def page_accounts(conn) -> str:
 
 def page_architecture(conn) -> str:
     from .classify import BATCH_SIZE
-    from .evaluate import MATURITY_DAYS
+    from .evaluate import MATURITY_DAYS, TARGET_RATIO_BY_ASSET
     from .prefilter import _ASSET_PATTERNS
     e = html.escape
     model = active_model()
@@ -524,7 +527,7 @@ def page_architecture(conn) -> str:
          ".flow b{display:block;font-size:13px;color:#9ecbff}.flow .n{display:block;font-size:20px;font-weight:700;color:#fff;margin:2px 0}"
          ".flow small{color:#9aa}"
          ".doc table td,.doc table th{padding:6px 10px;vertical-align:top}.pat td.mono{white-space:normal;overflow-wrap:anywhere;font-size:11.5px;color:#c9d1e0}"
-         "@media (max-width:700px){.st{grid-template-columns:1fr}.fm td.f{white-space:normal}}</style><div class=doc>"]
+         "@media (max-width:700px){.st{grid-template-columns:1fr}}</style><div class=doc>"]
 
     def stat(n):
         return f"<span class=n>{n:,}</span>"
@@ -592,10 +595,13 @@ def page_architecture(conn) -> str:
              "<tr><td>return</td><td class=f>r = exit / entry − 1</td><td>signed; SELL calls are judged on −r.</td></tr>"
              "<tr><td>flat band</td><td class=f>b = 0.5 · σ · √days</td><td>σ = trailing-1-year daily volatility of that asset, so “flat” scales with the "
              "asset and the horizon — a 2 % move is noise for BTC over 90 d.</td></tr>"
-             "<tr><td>result</td><td class=f>CORRECT = 1 · PARTIAL = 0.5 · WRONG = 0</td><td>CORRECT: market moved the predicted way beyond b. PARTIAL: predicted a move, "
-             "market stayed inside ±b (or vice versa). WRONG: moved the opposite way beyond b.</td></tr>"
+             "<tr><td>result</td><td class=f>CORRECT = 1 · PARTIAL = 0.5 · WRONG = 0</td><td>CORRECT: market moved the predicted way beyond b (or a NEUTRAL "
+             "call and it stayed inside). PARTIAL: predicted a move, market stayed inside ±b. WRONG: moved the opposite way beyond b — or a NEUTRAL "
+             "call and the market moved beyond b either way (a “sideways” call is falsified by any big move; scoring it PARTIAL made NEUTRAL a free 0.5 floor).</td></tr>"
              "<tr><td>price target</td><td class=f>±0.25</td><td>+0.25 if any close inside the horizon touched the stated level, −0.25 if none did. "
-             "A stated level is the most falsifiable claim an account makes.</td></tr></table>")
+             "A stated level is the most falsifiable claim an account makes. Ignored (no credit either way) when the target sits on the wrong side "
+             "of the entry close — it would be hit by construction — or is a unit error (SPY points against SPX, gold “76”): "
+             f"target / entry outside {TARGET_RATIO_BY_ASSET['BTC']} for BTC, {TARGET_RATIO_BY_ASSET['GOLD']} for GOLD / SPX.</td></tr></table>")
 
     B.append("<h2 id=s-trust>5 · Trust <small>src/score.py</small></h2>"
              "<p>Trust is a <b>cell-level</b> quantity: one score per (account, asset, horizon) — the "
@@ -614,10 +620,12 @@ def page_architecture(conn) -> str:
              "<tr><td>window</td><td class=f>called_at ≥ today − maturity</td><td>only calls inside the horizon's window count (90 / 365 / 730 d).</td></tr>"
              "<tr><td>one vote</td><td class=f>latest call per account</td><td>an account's earlier calls in the window are ignored — a prolific poster "
              "cannot outvote quieter accounts; the vote still decays with the age of that latest call.</td></tr>"
-             "<tr><td>weight</td><td class=f>w = T · confidence · 2<sup>−age / (window/3)</sup></td><td>trust × classifier confidence × recency; half-life is a third "
-             "of the window, so a 90-day-old SHORT call weighs an eighth.</td></tr>"
+             "<tr><td>weight</td><td class=f>w = T · √confidence · 2<sup>−age / (window/3)</sup></td><td>trust × √(classifier confidence) × recency; half-life is a third "
+             "of the window, so a 90-day-old SHORT call weighs an eighth. The square root because confidence 0.6 vs 0.9 predicts the outcome by only "
+             "~9 pts — it should not swing a vote by 50 %.</td></tr>"
              "<tr><td>net</td><td class=f>net = (Σw<sub>BUY</sub> − Σw<sub>SELL</sub>) / Σw</td><td>−1 … +1.</td></tr>"
-             f"<tr><td>label</td><td class=f>BUY if net &gt; +{NB} · SELL if net &lt; −{NB} · else NEUTRAL</td><td>N/A when Σw &lt; {MW} (not enough weighted evidence).</td></tr>"
+             f"<tr><td>label</td><td class=f>BUY if net &gt; +{NB} · SELL if net &lt; −{NB} · else NEUTRAL</td><td>N/A when Σw &lt; {MW} or fewer than "
+             f"{matrix.MIN_ACCOUNTS} accounts voted (one fresh vote clears the weight floor on its own); the same gate applies to school sub-labels.</td></tr>"
              "<tr><td>concentration</td><td class=f>top_share = max w / Σw</td><td>shown amber ≥ 50 % — one account carrying half a cell is a warning, not a signal.</td></tr>"
              f"<tr><td>schools</td><td class=f>same, per school</td><td>each <code>accounts.school</code> gets its own sub-label per cell on <a href='{_u('/matrix')}' style='color:#9ecbff'>Matrix</a>.</td></tr></table>"
              "<p>Outputs: <code>data/matrix.json</code> → public <code>site.json</code>, this panel, the Audit page, the TradingView script (publishing on hold).</p>")

@@ -57,10 +57,10 @@
 <table>
 <tr><th>Outcome</th><th class="num">Points</th><th>When</th></tr>
 <tr><td>Correct</td><td class="num">1.0</td><td>Called direction matches the market's direction (or called neutral and the market stayed inside the band).</td></tr>
-<tr><td>Partial</td><td class="num">0.5</td><td>Called a direction and the market stayed flat — or called neutral and it moved.</td></tr>
-<tr><td>Wrong</td><td class="num">0.0</td><td>Called one direction, market went the other.</td></tr>
+<tr><td>Partial</td><td class="num">0.5</td><td>Called a direction and the market stayed flat.</td></tr>
+<tr><td>Wrong</td><td class="num">0.0</td><td>Called one direction, market went the other — or called neutral and the market moved beyond the band either way. A "sideways" call is falsified by any big move; if it only cost half a point, hedging would be free.</td></tr>
 </table>
-<p>A stated price target is the most falsifiable thing an account can say, so it carries its own adjustment: <strong>+0.25</strong> if any daily close inside the horizon touched the target, <strong>−0.25</strong> if none did. The best close reached (the "extreme") is recorded either way, so a near miss is visible.</p>
+<p>A stated price target is the most falsifiable thing an account can say, so it carries its own adjustment: <strong>+0.25</strong> if any daily close inside the horizon touched the target, <strong>−0.25</strong> if none did. The best close reached (the "extreme") is recorded either way, so a near miss is visible. A target that sits on the wrong side of the entry price — a "buy" whose target is below where the asset already trades — would be touched by construction, so it earns nothing either way; the same goes for targets in the wrong units (an index level quoted in ETF points).</p>
 
 <h2 id="trust">Trust</h2>
 <p>Trust is a per-account score for each asset and horizon, built only from matured calls:</p>
@@ -74,8 +74,8 @@
 
 <h2 id="matrix">The consensus reading</h2>
 <p>For each of the nine cells (asset × horizon), every account gets one vote — its latest call inside the horizon window — weighted and summed:</p>
-<div class="formula">weight = trust(account, asset, horizon) × confidence × 2<sup>−age / (window / 3)</sup><br>net = (Σ buy weight − Σ sell weight) / Σ all weight</div>
-<p>One vote per account: an account that posts twenty calls a month counts once, at its latest view, so volume cannot outvote the roster. The recency term halves a vote's weight every third of the window, and calls older than the full window drop out — a three-month-old short call is stale by definition. The label is Buy above +0.15, Sell below −0.15, Neutral between, and n/a when there is too little weight to say anything. Each school also gets its own sub-reading per cell, weighted by the sum of its members' trust, so a one-person school cannot dominate.</p>
+<div class="formula">weight = trust(account, asset, horizon) × √confidence × 2<sup>−age / (window / 3)</sup><br>net = (Σ buy weight − Σ sell weight) / Σ all weight</div>
+<p>One vote per account: an account that posts twenty calls a month counts once, at its latest view, so volume cannot outvote the roster. The extraction model's confidence enters as a square root — it separates outcomes only weakly, so it should nudge a vote, not halve it. The recency term halves a vote's weight every third of the window, and calls older than the full window drop out — a three-month-old short call is stale by definition. The label is Buy above +0.15, Sell below −0.15, Neutral between, and n/a when there is too little weight or fewer than three accounts have voted — one account is an opinion, not a reading. Each school also gets its own sub-reading per cell under the same rules, weighted by the sum of its members' trust, so a one-person school cannot dominate.</p>
 
 <h2 id="reading">How to read it honestly</h2>
 <div class="note">

@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from .db import connect
-from .evaluate import MATURITY_DAYS
+from .evaluate import MATURITY_DAYS, TARGET_RATIO, TARGET_RATIO_BY_ASSET
 from .models import active_model, list_models
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -96,9 +96,10 @@ def _flags(r) -> list[str]:
         f.append("neutral")
     if r["price_target"] and r["entry_close"]:
         ratio = r["price_target"] / r["entry_close"]
-        if ratio > 5 or ratio < 0.2:
+        lo, hi = TARGET_RATIO_BY_ASSET.get(r["asset"], TARGET_RATIO)
+        if not (lo <= ratio <= hi):
             f.append("target-units")
-        elif (r["direction"] == "BUY" and ratio < 1) or (r["direction"] == "SELL" and ratio > 1):
+        elif (r["direction"] == "BUY" and ratio <= 1) or (r["direction"] == "SELL" and ratio >= 1):
             f.append("target-vs-direction")
     if r["result"] == "WRONG" and r["confidence"] >= 0.7:
         f.append("confident-wrong")
@@ -172,7 +173,9 @@ def body(conn, model: str | None = None, limit: int | None = None, account: str 
 <input id=f-q placeholder="search text… ( / )" size=26> <span id=f-n class=pill></span></div>
 <p class=help><b>Verify a row:</b> <i>tweet ↗</i> → read the highlighted quote → judge asset / direction / horizon / target.
 <i>entry</i> / <i>exit</i> open Yahoo history (±5 d) to check closes; <i>TV</i> opens the chart. <i>raw</i> shows the stored record as JSON.
-<i>market did</i> = realised direction vs the flat band. <i>gate</i> = Jev is_call probability; <code>low-gate</code> flags &lt; 0.5.
+<i>market did</i> = realised direction vs the flat band; a NEUTRAL call scores WRONG when the market moved beyond it either way.
+<i>target</i>: HIT / miss earn ±0.25; <i>ignored</i> = wrong side of the entry or a unit error, no credit either way.
+<i>gate</i> = Jev is_call probability; <code>low-gate</code> flags &lt; 0.5.
 Flags are automatic review hints, not errors. Filters are kept in the URL — share it.</p>
 <table id=calls class=sortable><thead><tr><th>#</th><th>account · date</th><th>tweet (quote highlighted)</th><th>asset</th>
 <th>call</th><th>horizon</th><th>conf</th><th title='Jev gate p_call (is_call probability, blank for calls labeled before the gate)'>gate</th><th>target</th><th>entry</th><th>exit</th><th>return</th><th>market did</th><th>result</th><th>verify</th></tr></thead><tbody>""")
@@ -200,6 +203,8 @@ Flags are automatic review hints, not errors. Filters are kept in the URL — sh
             tgt = _fmt(r["price_target"], 0)
             if r["target_hit"] is not None:
                 tgt += f"<br><small class=hit{r['target_hit']}>{'HIT' if r['target_hit'] else 'miss'} · ext {_fmt(r['extreme'], 0)}</small>"
+            elif r["result"] and ("target-units" in fl or "target-vs-direction" in fl):
+                tgt += "<br><small title='wrong side of entry or implausible ratio: no ±0.25'>ignored</small>"
         else:
             tgt = "<small>–</small>"
         raw = {k: r[k] for k in r.keys() if k != "text"}

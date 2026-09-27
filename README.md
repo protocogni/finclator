@@ -5,7 +5,8 @@ Trust-weighted influencer sentiment → a 3×3 **Buy / Neutral / Sell** matrix f
 
 Tweets-first: every explicit, falsifiable call in an influencer's tweets is extracted with its quote, evaluated
 against price history when the horizon matures, and rolled into a shrunk trust score per (account, asset, horizon).
-The matrix is the trust × confidence × recency weighted vote of the roster's live calls.
+The matrix is the trust × √confidence × recency weighted vote of the roster's live calls — one vote per account per
+cell (its latest call in the window), N/A below 3 voters.
 
 ## Pipeline
 

@@ -1,9 +1,9 @@
-"""3x3 matrix: for each (asset, horizon) aggregate recent calls, weighted by trust × confidence × recency.
+"""3x3 matrix: for each (asset, horizon) aggregate recent calls, weighted by trust × √confidence × recency.
 
 Recency: exponential decay with half-life = 1/3 of the horizon's maturity window, and a hard cutoff at the
 full window (a SHORT call older than 3 months is stale by definition).
 One vote per account per cell: only its latest call inside the window counts (`n_calls` = calls in window,
-`n_accounts` = votes).
+`n_accounts` = votes). A cell (or school sub-label) with fewer than MIN_ACCOUNTS voters is N/A.
 School aggregation: sum of member weights (a one-person school cannot dominate). `top_handle`/`top_share` = the
 single account carrying the largest share of a cell's weight (concentration warning at ≥ 0.5); `contributors` are
 the 15 heaviest. Written to data/matrix.json.
@@ -27,10 +27,11 @@ ASSETS = ("BTC", "GOLD", "SPX")
 HORIZONS = ("SHORT", "MEDIUM", "LONG")
 NEUTRAL_BAND = 0.15   # |net| below this → NEUTRAL
 MIN_WEIGHT = 0.3      # below this total weight → N/A (insufficient data)
+MIN_ACCOUNTS = 3      # fewer distinct voters → N/A (one fresh vote at 0.5 × 0.7 clears MIN_WEIGHT alone)
 
 
-def _label(net: float, total: float) -> str:
-    if total < MIN_WEIGHT:
+def _label(net: float, total: float, n_accounts: int | None = None) -> str:
+    if total < MIN_WEIGHT or (n_accounts is not None and n_accounts < MIN_ACCOUNTS):
         return "N/A"
     if net > NEUTRAL_BAND:
         return "BUY"
@@ -54,7 +55,7 @@ def build(conn: sqlite3.Connection, today: date | None = None, write: bool = Tru
             since = (today - timedelta(days=window)).isoformat()
             until = (today + timedelta(days=1)).isoformat()  # point-in-time: no calls from after `today` (Pine history)
             rows = conn.execute("""SELECT handle, direction, confidence, called_at, quote, tweet_id FROM calls
-                                   WHERE model=? AND asset=? AND horizon=? AND called_at>=? AND called_at<? ORDER BY called_at DESC""",
+                                   WHERE model=? AND asset=? AND horizon=? AND called_at>=? AND called_at<? ORDER BY called_at DESC, id DESC""",
                                 (model, asset, horizon, since, until)).fetchall()
             # one vote per account: its latest call in the window (rows are newest-first); repeats are dropped so a
             # prolific poster cannot outvote a roster of quieter ones
@@ -68,7 +69,10 @@ def build(conn: sqlite3.Connection, today: date | None = None, write: bool = Tru
                     continue
                 seen.add(r["handle"])
                 age = (today - date.fromisoformat(r["called_at"][:10])).days
-                w = trust.get(r["handle"], asset, horizon) * r["confidence"] * math.exp(-math.log(2) * age / half_life)
+                # √confidence: the classifier's 0.6–0.9 range predicts outcome by only ~9 pts, so it should not
+                # swing a vote's weight by 50 %
+                w = (trust.get(r["handle"], asset, horizon) * math.sqrt(r["confidence"])
+                     * math.exp(-math.log(2) * age / half_life))
                 d = r["direction"]
                 if d == "BUY":
                     buy += w
@@ -76,8 +80,9 @@ def build(conn: sqlite3.Connection, today: date | None = None, write: bool = Tru
                     sell += w
                 else:
                     neutral += w
-                s = per_school.setdefault(schools.get(r["handle"], "?"), {"buy": 0.0, "sell": 0.0, "neutral": 0.0})
+                s = per_school.setdefault(schools.get(r["handle"], "?"), {"buy": 0.0, "sell": 0.0, "neutral": 0.0, "n": 0})
                 s["buy" if d == "BUY" else "sell" if d == "SELL" else "neutral"] += w
+                s["n"] += 1
                 per_handle[r["handle"]] = per_handle.get(r["handle"], 0.0) + w
                 contributors.append({"handle": r["handle"], "direction": d, "date": r["called_at"][:10],
                                      "weight": round(w, 3), "quote": r["quote"], "tweet_id": r["tweet_id"]})
@@ -86,12 +91,13 @@ def build(conn: sqlite3.Connection, today: date | None = None, write: bool = Tru
             top_handle, top_w = max(per_handle.items(), key=lambda kv: kv[1]) if per_handle else (None, 0.0)
             contributors.sort(key=lambda x: -x["weight"])
             matrix["cells"][f"{asset}:{horizon}"] = {
-                "asset": asset, "horizon": horizon, "label": _label(net, total),
+                "asset": asset, "horizon": horizon, "label": _label(net, total, len(seen)),
                 "net": round(net, 3), "buy": round(buy, 3), "sell": round(sell, 3), "neutral": round(neutral, 3),
                 "n_calls": len(rows), "n_accounts": len(seen),
                 "top_handle": top_handle, "top_share": round(top_w / total, 3) if total else 0.0,
-                "schools": {k: {**{kk: round(vv, 3) for kk, vv in v.items()},
-                                "label": _label((v["buy"] - v["sell"]) / (sum(v.values()) or 1), sum(v.values()))}
+                "schools": {k: {**{kk: (round(vv, 3) if kk != "n" else vv) for kk, vv in v.items()},
+                                "label": _label((v["buy"] - v["sell"]) / ((v["buy"] + v["sell"] + v["neutral"]) or 1),
+                                                v["buy"] + v["sell"] + v["neutral"], v["n"])}
                             for k, v in per_school.items()},
                 "contributors": contributors[:15],
             }

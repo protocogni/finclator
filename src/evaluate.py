@@ -2,7 +2,10 @@
 
 Horizon maturity (spec): SHORT 3 months, MEDIUM 12 months, LONG 24 months (evaluation point inside the 1-5y band).
 Direction threshold ("flat" band) is volatility-scaled: K_SIGMA * sigma_daily * sqrt(days) at entry, per asset.
-Price targets: hit if any close within the horizon reaches the target (>= for BUY, <= for SELL).
+Result (`grade`): CORRECT = same label; PARTIAL = predicted a move, market flat; WRONG = opposite move, or a NEUTRAL
+call when the market moved beyond the band.
+Price targets: hit if any close within the horizon reaches the target (>= for BUY, <= for SELL). A target on the wrong
+side of the entry close, or an implausible ratio to it, is ignored (`target_is_sane`) — it would be hit by construction.
 """
 from __future__ import annotations
 
@@ -15,6 +18,36 @@ from .prices import close_on_or_after
 
 MATURITY_DAYS = {"SHORT": 90, "MEDIUM": 365, "LONG": 730}
 K_SIGMA = 0.5  # half a standard deviation of the horizon move counts as "flat"
+TARGET_RATIO = (0.2, 5.0)  # fallback band for an unknown asset
+# target / entry outside this band is a unit error, not a claim: SPY 485 vs SPX 4,846 (0.10), "DOW 50,000" vs SPX
+# 6,932 (7.2), gold "76" at 4,720. BTC keeps its hyperbole — "$BTC = $1mm" at 60k (16×) is a real claim that missed.
+TARGET_RATIO_BY_ASSET = {"BTC": (0.1, 100.0), "GOLD": (0.33, 3.0), "SPX": (0.33, 3.0)}
+
+
+def target_is_sane(direction: str, target: float, entry_close: float, asset: str | None = None) -> bool:
+    """A price target only counts when it lies on the predicted side of the entry and within a plausible ratio.
+
+    A BUY target below entry (or SELL above) is hit by construction — max(close) ≥ entry ≥ target — and was handing
+    +0.25 trust to mislabeled levels ("hold above $60k" stored as a target) and to unit errors.
+    """
+    if not entry_close or target <= 0:
+        return False
+    ratio = target / entry_close
+    lo, hi = TARGET_RATIO_BY_ASSET.get(asset or "", TARGET_RATIO)
+    if not (lo <= ratio <= hi):
+        return False
+    return ratio > 1 if direction == "BUY" else ratio < 1
+
+
+def grade(pred: str, actual: str) -> str:
+    """CORRECT: same label. PARTIAL: predicted a move and the market stayed flat. WRONG: the opposite move — and a
+    NEUTRAL call when the market moved beyond the band either way (a "sideways" call is falsified by any big move;
+    scoring it PARTIAL made NEUTRAL a free 0.5 floor that pulled trust above the prior)."""
+    if pred == actual:
+        return "CORRECT"
+    if actual == "NEUTRAL":
+        return "PARTIAL"
+    return "WRONG"
 
 
 def _daily_sigma(conn: sqlite3.Connection, asset: str, entry: str, lookback_days: int = 365) -> float:
@@ -59,15 +92,10 @@ def evaluate(conn: sqlite3.Connection, today: date | None = None) -> int:
         thr = K_SIGMA * sigma * math.sqrt(_trading_days(c["asset"], MATURITY_DAYS[c["horizon"]])) * 100
         actual = "NEUTRAL" if abs(ret) < thr else ("BUY" if ret > 0 else "SELL")
         pred = c["direction"]
-        if pred == actual:
-            result = "CORRECT"
-        elif "NEUTRAL" in (pred, actual):
-            result = "PARTIAL"   # off by one step
-        else:
-            result = "WRONG"     # opposite direction
+        result = grade(pred, actual)
 
         target_hit, extreme = None, None
-        if c["price_target"] and pred in ("BUY", "SELL"):
+        if c["price_target"] and pred in ("BUY", "SELL") and target_is_sane(pred, c["price_target"], entry[1], c["asset"]):
             extreme = _extreme(conn, c["asset"], entry[0], exit_[0], pred)
             if extreme is not None:
                 target_hit = int(extreme >= c["price_target"]) if pred == "BUY" else int(extreme <= c["price_target"])

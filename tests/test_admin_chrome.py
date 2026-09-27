@@ -5,11 +5,14 @@ from src import admin
 
 
 def test_local_chrome_is_plain():
-    html = admin._page("t", "<p>x</p>", "/matrix")
+    html = admin._page("t", "<p>x</p>", "/accounts")
     assert html.count("<nav>") == 1
     assert "sign out" not in html
-    assert "href='/matrix' class='on'" in html
+    assert "href='/accounts' class='on'" in html
     assert "<meta http-equiv=refresh content=30>" in html
+    # matrix / audit / tables hold open <details> or typed input — a refresh would wipe them
+    for tab in ("/matrix", "/audit", "/tables"):
+        assert "http-equiv=refresh" not in admin._page("t", "", tab)
 
 
 def test_hosted_chrome_prefix_who_readonly():
@@ -52,3 +55,7 @@ def test_chrome_has_responsive_css():
     assert "nav{display:flex;flex-wrap:wrap" in admin.CSS
     assert "<meta name=viewport content='width=device-width" in html   # without it phones render at 980 px
     assert "<div class=tw>" in html            # every table is wrapped in a horizontal-scroll container
+    # formula legends (.fm) pin their first two columns with nowrap on desktop; phones must release them or the
+    # third column collapses to ~80 px and one table runs 1,000+ px tall
+    mobile = admin.CSS[admin.CSS.index("@media (max-width:700px)"):]
+    assert ".fm td.f,.fm td:first-child{white-space:normal}" in mobile
