@@ -2,6 +2,8 @@
 
 Recency: exponential decay with half-life = 1/3 of the horizon's maturity window, and a hard cutoff at the
 full window (a SHORT call older than 3 months is stale by definition).
+One vote per account per cell: only its latest call inside the window counts (`n_calls` = calls in window,
+`n_accounts` = votes).
 School aggregation: sum of member weights (a one-person school cannot dominate). `top_handle`/`top_share` = the
 single account carrying the largest share of a cell's weight (concentration warning at ≥ 0.5); `contributors` are
 the 15 heaviest. Written to data/matrix.json.
@@ -54,12 +56,17 @@ def build(conn: sqlite3.Connection, today: date | None = None, write: bool = Tru
             rows = conn.execute("""SELECT handle, direction, confidence, called_at, quote, tweet_id FROM calls
                                    WHERE model=? AND asset=? AND horizon=? AND called_at>=? AND called_at<? ORDER BY called_at DESC""",
                                 (model, asset, horizon, since, until)).fetchall()
-            # latest call per account dominates; older ones from the same account decay
+            # one vote per account: its latest call in the window (rows are newest-first); repeats are dropped so a
+            # prolific poster cannot outvote a roster of quieter ones
             per_school: dict[str, dict] = {}
             per_handle: dict[str, float] = {}
             contributors = []
             buy = sell = neutral = 0.0
+            seen: set[str] = set()
             for r in rows:
+                if r["handle"] in seen:
+                    continue
+                seen.add(r["handle"])
                 age = (today - date.fromisoformat(r["called_at"][:10])).days
                 w = trust.get(r["handle"], asset, horizon) * r["confidence"] * math.exp(-math.log(2) * age / half_life)
                 d = r["direction"]
@@ -81,7 +88,7 @@ def build(conn: sqlite3.Connection, today: date | None = None, write: bool = Tru
             matrix["cells"][f"{asset}:{horizon}"] = {
                 "asset": asset, "horizon": horizon, "label": _label(net, total),
                 "net": round(net, 3), "buy": round(buy, 3), "sell": round(sell, 3), "neutral": round(neutral, 3),
-                "n_calls": len(rows),
+                "n_calls": len(rows), "n_accounts": len(seen),
                 "top_handle": top_handle, "top_share": round(top_w / total, 3) if total else 0.0,
                 "schools": {k: {**{kk: round(vv, 3) for kk, vv in v.items()},
                                 "label": _label((v["buy"] - v["sell"]) / (sum(v.values()) or 1), sum(v.values()))}

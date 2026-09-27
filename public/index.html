@@ -114,7 +114,7 @@
     const lbl = c.label === "N/A" ? "NA" : c.label;
     const word = {BUY: "Buy", SELL: "Sell", NEUTRAL: "Neutral", NA: "n/a"}[lbl];
     const top = c.top_share >= 0.5 ? ` · top ${Math.round(c.top_share * 100)} %` : "";
-    td.innerHTML = `<span class="cell ${lbl}"><b>${word}</b><small>net ${c.net >= 0 ? "+" : ""}${c.net.toFixed(2)} · ${c.n} calls${top}</small></span>`;
+    td.innerHTML = `<span class="cell ${lbl}"><b>${word}</b><small>net ${c.net >= 0 ? "+" : ""}${c.net.toFixed(2)} · ${c.accounts ?? c.n} accounts${top}</small></span>`;
   }));
   $("matrix-cap").textContent = `Trust-weighted consensus of the roster as of ${d.matrix_generated_at}. Net score in −1…+1; |net| ≤ 0.15 reads Neutral. "top" = one account carries that share of the cell.`;
   const ex = d.example; if (!ex) return;

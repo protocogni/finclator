@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-09-27T10:27+00:00",
+ "generated_at": "2026-09-27T20:09+00:00",
  "accounts": 98,
  "tweets": 156496,
  "from": "2017",
@@ -55,58 +55,67 @@
  ],
  "matrix": {
   "BTC:SHORT": {
-   "label": "NEUTRAL",
-   "net": 0.106,
+   "label": "BUY",
+   "net": 0.45,
    "n": 169,
-   "top_share": 0.33
+   "accounts": 29,
+   "top_share": 0.068
   },
   "BTC:MEDIUM": {
    "label": "BUY",
-   "net": 0.202,
+   "net": 0.752,
    "n": 485,
-   "top_share": 0.147
+   "accounts": 40,
+   "top_share": 0.056
   },
   "BTC:LONG": {
    "label": "BUY",
-   "net": 0.649,
+   "net": 0.671,
    "n": 1391,
-   "top_share": 0.174
+   "accounts": 51,
+   "top_share": 0.041
   },
   "GOLD:SHORT": {
-   "label": "BUY",
-   "net": 0.347,
+   "label": "NEUTRAL",
+   "net": 0.099,
    "n": 54,
-   "top_share": 0.154
+   "accounts": 21,
+   "top_share": 0.105
   },
   "GOLD:MEDIUM": {
    "label": "BUY",
-   "net": 0.873,
+   "net": 0.787,
    "n": 297,
-   "top_share": 0.457
+   "accounts": 32,
+   "top_share": 0.082
   },
   "GOLD:LONG": {
    "label": "BUY",
-   "net": 0.924,
+   "net": 0.697,
    "n": 894,
-   "top_share": 0.359
+   "accounts": 50,
+   "top_share": 0.051
   },
   "SPX:SHORT": {
-   "label": "NEUTRAL",
-   "net": -0.138,
+   "label": "SELL",
+   "net": -0.211,
    "n": 59,
-   "top_share": 0.15
+   "accounts": 15,
+   "top_share": 0.138
   },
   "SPX:MEDIUM": {
-   "label": "BUY",
-   "net": 0.256,
+   "label": "NEUTRAL",
+   "net": 0.015,
    "n": 171,
-   "top_share": 0.189
+   "accounts": 36,
+   "top_share": 0.063
   },
   "SPX:LONG": {
-   "label": "NEUTRAL",
-   "net": -0.004,
+   "label": "BUY",
+   "net": 0.253,
    "n": 250,
-   "top_share": 0.176
+   "accounts": 40,
+   "top_share": 0.059
   }
  },
  "matrix_generated_at": "2026-09-27",

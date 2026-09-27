@@ -67,6 +67,9 @@ pre{background:#0a0c10;padding:10px;border-radius:6px;max-height:340px;overflow:
 .help{color:#9aa;font-size:12px;margin:2px 0 10px;max-width:1100px;line-height:1.45}
 td.stale{color:#f0b64c}
 .tw{overflow-x:auto;max-width:100%}
+.fm{width:100%;max-width:980px;margin:6px 0 14px}.fm td:first-child{white-space:nowrap;font-weight:600;color:#fff}
+.fm td.f{font-family:ui-monospace,monospace;font-size:12.5px;white-space:nowrap;color:#ffd479}.fm td{padding:5px 10px;vertical-align:top;line-height:1.45}
+.fm td:last-child{color:#d6dae3}
 @media (max-width:700px){main{padding:10px}.card{min-width:0;flex:1 1 44%}
 .grid{width:100%;table-layout:fixed}.grid td{width:auto;min-width:0;height:auto;padding:5px 2px;font-size:11px;white-space:normal;overflow-wrap:anywhere}
 .grid td small{font-size:9px;white-space:normal;display:block}.grid th{font-size:11px;padding:3px 2px;white-space:normal}.grid td:first-child,.grid th:first-child{width:38px}
@@ -139,6 +142,17 @@ def _log_tail(n=200) -> str:
 _TABLE_OPEN = re.compile(r"<table(?=[ >])")
 
 
+def _last_log_stage() -> str | None:
+    """Last pipeline-stage line (fetch/gate/classify/pine/audit/site/…) in data/pipeline.log, timestamp stripped."""
+    if not LOG.exists():
+        return None
+    for ln in reversed(LOG.read_text(errors="replace").splitlines()[-400:]):
+        body = ln[20:] if len(ln) > 20 and ln[19] == " " else ln
+        if re.match(r"(fetch|gate|classify|prices|evaluate|score|matrix|pine|audit|site)\b", body):
+            return ln[:16] + " " + body
+    return None
+
+
 def _wrap_tables(body: str) -> str:
     """Give every table a horizontal-scroll container (mobile). Idempotent on already-wrapped markup."""
     if "<div class=tw>" in body:
@@ -192,6 +206,8 @@ def status(conn) -> dict:
         "backfill_running": _proc_running("scripts/backfill.py"),
         "classify_running": _proc_running("scripts/classify_run.py"),
         "run_running": _proc_running("src.run"),
+        "rebuild_running": _proc_running(r"src\.(run|pine|matrix|site|audit)|rebuild\.py"),
+        "rebuild_stage": _last_log_stage(),
         "tweets": f["t"], "relevant": f["rel"], "classified": f["cls"], "pending_classification": pending,
         "classify_rate_per_min": round(rate, 1) if rate else None,
         "classify_eta_hours": round(pending / rate / 60, 2) if rate else None,
@@ -232,6 +248,10 @@ def page_progress(conn) -> str:
     cards = [
         ("backfill", run_state, "scripts/backfill.py (twitterapi.io fetch)"),
         ("classifier", cls_state, f"{e(s['model'])}<br>{eta}"),
+        ("pipeline rebuild", "<small>operator machine</small>" if _readonly() else
+         "<span class=ok>running</span>" if s["rebuild_running"] else "<span class=warn>idle</span>",
+         "matrix → audit → pine (3 y of weekly point-in-time matrices, the slow step) → site"
+         + (f"<br><span class=mono>{e(s['rebuild_stage'])}</span>" if s["rebuild_stage"] else "")),
         ("Jev gate", f"{s['gated']:,}", f"{s['gate_passed']:,} passed ({pct(s['gate_passed'], s['gated']):.0f}%) · {e(s['gate_model'] or '—')}"
                                        f"<br>last {(s['gate_last_at'] or '—')[:16]}"),
         ("accounts fetched", f"{s['accounts_fetched']} / {s['accounts']}", f"{s['accounts_active']} active"),
@@ -312,15 +332,23 @@ def page_matrix(conn) -> str:
             ts = c.get("top_share", 0) or 0
             top = (f"<br><small class='{'warn' if ts >= 0.5 else ''}'>top @{e(c.get('top_handle') or '–')} {ts:.0%}</small>"
                    if c.get("top_handle") else "")
+            na = c.get("n_accounts", c["n_calls"])
             tds += (f"<td class={cls}><a href='{_u('/audit')}?asset={a}&hz={h}' style='color:inherit;text-decoration:none'>{c['label']}</a>"
-                    f"<br><small>n={c['n_calls']} net={c['net']:+.2f} w={w:.2f}</small>{top}</td>")
+                    f"<br><small>{na} accts · {c['n_calls']} calls net={c['net']:+.2f} w={w:.2f}</small>{top}</td>")
         B.append(f"<tr><th>{a}</th>{tds}</tr>")
     B.append("</table>")
-    B.append("<p class=help>Each cell is the trust-weighted lean of the roster's calls inside that horizon window. "
-             "<b>n</b> = calls in the window · <b>net</b> = (buy − sell) / total weight, −1…+1 (BUY &gt; +0.15, SELL &lt; −0.15, "
-             "else NEUTRAL; N/A when total weight &lt; 0.3) · <b>w</b> = Σ trust × confidence × 2<sup>−age/(window/3)</sup> · "
-             "<b>top</b> = largest single account's share of w (amber ≥ 50 %: one account is carrying the cell — that is its "
-             "view, not a consensus).</p>")
+    B.append("<p class=help>Each cell is the trust-weighted lean of the roster inside that horizon window, <b>one vote per account</b>. "
+             "Click a cell for the calls behind it on Audit.</p><table class=fm>"
+             "<tr><td>vote</td><td class=f>latest call per account in the window</td><td>earlier repeats by the same account are ignored, so a prolific "
+             "poster cannot outvote quieter accounts. Window = 90 / 365 / 730 d for SHORT / MEDIUM / LONG.</td></tr>"
+             "<tr><td>accts · calls</td><td class=f>votes · all calls in the window</td><td>the gap between the two is how much repetition was collapsed.</td></tr>"
+             "<tr><td>w</td><td class=f>Σ trust × confidence × 2<sup>−age/(window/3)</sup></td><td>total weight of the votes; each vote is the account's "
+             "trust in that cell × classifier confidence × recency (halves every third of the window).</td></tr>"
+             "<tr><td>net</td><td class=f>(Σw<sub>BUY</sub> − Σw<sub>SELL</sub>) / w</td><td>−1 … +1.</td></tr>"
+             f"<tr><td>label</td><td class=f>BUY &gt; +{matrix.NEUTRAL_BAND} · SELL &lt; −{matrix.NEUTRAL_BAND} · else NEUTRAL</td>"
+             f"<td>N/A when w &lt; {matrix.MIN_WEIGHT} — too little weighted evidence.</td></tr>"
+             "<tr><td>top</td><td class=f>max vote / w</td><td>the largest single account's share; amber ≥ 50 % means one account is carrying the "
+             "cell — that is its view, not a consensus.</td></tr></table>")
 
     B.append("<h2>Hit rate vs always-BUY <small>· same matured outcomes, target bonus excluded</small></h2>"
              "<table><tr><th>horizon</th><th title='matured calls of the active model'>n</th>"
@@ -334,17 +362,24 @@ def page_matrix(conn) -> str:
         edge = v["rate"] - v["baseline"]
         B.append(f"<tr><td>{hz}</td><td class=num>{v['n']:,}</td><td class=num>{v['rate']:.1%}</td><td class=num>{v['baseline']:.1%}</td>"
                  f"<td class='num {'ok' if edge > 0.02 else 'err' if edge < -0.02 else 'warn'}'>{edge:+.1%}</td></tr>")
-    B.append("</table><p class=help>Edge = roster − always-BUY. Most of the covered period was a bull market, so a high hit rate "
-             "alone is not skill; only the edge column says whether the roster beat “just buy”.</p>")
+    B.append("</table><table class=fm>"
+             "<tr><td>roster</td><td class=f>Σ result / n</td><td>CORRECT = 1, PARTIAL = 0.5, WRONG = 0 over every matured call of the active model; "
+             "price-target credit excluded so both columns use the same scale.</td></tr>"
+             "<tr><td>always-BUY</td><td class=f>same outcomes, direction forced to BUY</td><td>market up = 1, flat = 0.5, down = 0.</td></tr>"
+             "<tr><td>edge</td><td class=f>roster − always-BUY</td><td>most of the covered period was a bull market, so a high hit rate alone is not "
+             "skill; only this column says whether the roster beat “just buy”. Green &gt; +2 pts, red &lt; −2 pts.</td></tr></table>")
 
-    B.append("<h2>Contributors per cell <small>(15 heaviest; weight = trust × confidence × recency)</small></h2>")
+    B.append("<h2>Contributors per cell</h2><table class=fm>"
+             "<tr><td>rows</td><td class=f>15 heaviest votes</td><td>one row per account — its latest call in the window.</td></tr>"
+             "<tr><td>weight</td><td class=f>trust × confidence × recency</td><td>the vote's share of the cell; the same number the matrix sums.</td></tr>"
+             "<tr><td>header</td><td class=f>label (accounts, calls) · school sub-labels</td><td>each school's own reading from its members' votes.</td></tr></table>")
     for a in ASSETS:
         for h in HORIZONS:
             c = m["cells"].get(f"{a}:{h}")
             if not c or not c.get("contributors"):
                 continue
             sch = " · ".join(f"{k}: {v['label']}" for k, v in c.get("schools", {}).items())
-            B.append(f"<details><summary><b>{a} {h}</b> — {c['label']} (n={c['n_calls']}) <small>{e(sch)}</small></summary><table class=sortable><thead><tr>"
+            B.append(f"<details><summary><b>{a} {h}</b> — {c['label']} ({c.get('n_accounts', '?')} accounts, {c['n_calls']} calls) <small>{e(sch)}</small></summary><table class=sortable><thead><tr>"
                      "<th>account</th><th>direction</th><th>called</th><th>weight</th><th>quote</th><th>tweet</th></tr></thead><tbody>")
             for x in c["contributors"]:
                 B.append(f"<tr><td>@{e(x['handle'])}</td><td class={x['direction']}>{x['direction']}</td><td>{x['date']}</td>"
@@ -358,8 +393,9 @@ def page_matrix(conn) -> str:
                           GROUP BY a.school ORDER BY mean DESC""", active_model()):
         B.append(f"<tr><td>{e(r['school'] or '')}</td><td class=num>{r['n_acc']}</td><td class=num>{r['scored']}</td>"
                  f"<td class=num>{(r['mean'] or 0):.3f}</td><td class=num>{r['sn']}</td></tr>")
-    B.append("</tbody></table><p class=help>mean trust = average of each scored member's overall score (all cells pooled); "
-             "Σn = their matured calls. Per-school sub-labels for each cell are inside the contributor sections above.</p>")
+    B.append("</tbody></table><table class=fm>"
+             "<tr><td>mean trust</td><td class=f>avg(overall score)</td><td>over the school's scored members; overall = all nine cells pooled.</td></tr>"
+             "<tr><td>Σn</td><td class=f>Σ matured calls</td><td>of those members. Per-school sub-labels per cell are in the contributor headers above.</td></tr></table>")
     return _page("matrix", "".join(B), "/matrix")
 
 
@@ -486,8 +522,7 @@ def page_architecture(conn) -> str:
          ".flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:8px 0 4px}.flow a{flex:1 1 150px;min-width:150px;background:#1c2029;"
          "border:1px solid #2e3441;border-radius:8px;padding:10px 12px;text-decoration:none;color:inherit}.flow a:hover{border-color:#4c9aff}"
          ".flow b{display:block;font-size:13px;color:#9ecbff}.flow .n{display:block;font-size:20px;font-weight:700;color:#fff;margin:2px 0}"
-         ".flow small{color:#9aa}.fm{width:100%}.fm td:first-child{white-space:nowrap;font-weight:600;color:#fff}"
-         ".fm td.f{font-family:ui-monospace,monospace;font-size:12.5px;white-space:nowrap;color:#ffd479}"
+         ".flow small{color:#9aa}"
          ".doc table td,.doc table th{padding:6px 10px;vertical-align:top}.pat td.mono{white-space:normal;overflow-wrap:anywhere;font-size:11.5px;color:#c9d1e0}"
          "@media (max-width:700px){.st{grid-template-columns:1fr}.fm td.f{white-space:normal}}</style><div class=doc>"]
 
@@ -576,8 +611,9 @@ def page_architecture(conn) -> str:
     B.append(f"<h2 id=s-matrix>6 · Matrix <small>src/matrix.py</small></h2>"
              "<p>Nine cells: {BTC, GOLD, SPX} × {SHORT, MEDIUM, LONG}. Everyone on the roster contributes; noisy accounts are outweighed, not filtered.</p>"
              "<table class=fm>"
-             "<tr><td>window</td><td class=f>called_at ≥ today − maturity</td><td>only calls inside the horizon's window count (90 / 365 / 730 d); the latest call "
-             "per account dominates, older ones from the same account decay.</td></tr>"
+             "<tr><td>window</td><td class=f>called_at ≥ today − maturity</td><td>only calls inside the horizon's window count (90 / 365 / 730 d).</td></tr>"
+             "<tr><td>one vote</td><td class=f>latest call per account</td><td>an account's earlier calls in the window are ignored — a prolific poster "
+             "cannot outvote quieter accounts; the vote still decays with the age of that latest call.</td></tr>"
              "<tr><td>weight</td><td class=f>w = T · confidence · 2<sup>−age / (window/3)</sup></td><td>trust × classifier confidence × recency; half-life is a third "
              "of the window, so a 90-day-old SHORT call weighs an eighth.</td></tr>"
              "<tr><td>net</td><td class=f>net = (Σw<sub>BUY</sub> − Σw<sub>SELL</sub>) / Σw</td><td>−1 … +1.</td></tr>"

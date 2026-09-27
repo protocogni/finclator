@@ -73,15 +73,15 @@
 </ul>
 
 <h2 id="matrix">The consensus reading</h2>
-<p>For each of the nine cells (asset × horizon), every call inside the horizon window is weighted and summed:</p>
+<p>For each of the nine cells (asset × horizon), every account gets one vote — its latest call inside the horizon window — weighted and summed:</p>
 <div class="formula">weight = trust(account, asset, horizon) × confidence × 2<sup>−age / (window / 3)</sup><br>net = (Σ buy weight − Σ sell weight) / Σ all weight</div>
-<p>The recency term halves a call's weight every third of the window, and calls older than the full window drop out — a three-month-old short call is stale by definition. The label is Buy above +0.15, Sell below −0.15, Neutral between, and n/a when there is too little weight to say anything. Each school also gets its own sub-reading per cell, weighted by the sum of its members' trust, so a one-person school cannot dominate.</p>
+<p>One vote per account: an account that posts twenty calls a month counts once, at its latest view, so volume cannot outvote the roster. The recency term halves a vote's weight every third of the window, and calls older than the full window drop out — a three-month-old short call is stale by definition. The label is Buy above +0.15, Sell below −0.15, Neutral between, and n/a when there is too little weight to say anything. Each school also gets its own sub-reading per cell, weighted by the sum of its members' trust, so a one-person school cannot dominate.</p>
 
 <h2 id="reading">How to read it honestly</h2>
 <div class="note">
 <p><strong>Direction, not magnitude.</strong> A Buy cell says the trusted part of the roster leans long; it says nothing about how far.</p>
 <p><strong>Regime bias is real.</strong> Most of the period covered has been a bull market for all three assets, and most of the roster is structurally bullish. Trust scores partly reward having been long while things went up. On the very same matured calls, an account that simply said "buy" every time would have scored <span id="m-base-short">—</span> short · <span id="m-base-medium">—</span> medium · <span id="m-base-long">—</span> long, against the roster's <span id="m-short">—</span> · <span id="m-medium">—</span> · <span id="m-long">—</span>. Where the roster does not beat that row it has no measurable edge; a flip away from Buy is therefore more informative than a Buy.</p>
-<p><strong>Volume is not evidence.</strong> One account can post a thousand calls a year; trust caps its influence but a prolific, decent account still carries the most weight in its cells. The largest single contributor's share of each cell's weight is reported with the reading — a cell where one account carries half the weight is that account's view, not a consensus. The full contributor list behind every cell is on the panel.</p>
+<p><strong>Volume is not evidence.</strong> One account can post a thousand calls a year; it still gets one vote per cell, at its latest view, and trust sets how much that vote weighs. The largest single contributor's share of each cell's weight is reported with the reading — a cell where one account carries half the weight is that account's view, not a consensus. The full contributor list behind every cell is on the panel.</p>
 <p><strong>The extraction is a model.</strong> Labels are produced by a language model checked against a hand-labeled reference set. On that set it agrees on whether a post is a call about 95 % of the time, and on direction and horizon roughly 90 % — but the reference set is small, so horizon remains the softest field, which is why the three horizons are kept separate rather than blended.</p>
 </div>
 

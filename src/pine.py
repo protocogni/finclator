@@ -12,7 +12,7 @@ import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
-from .db import connect
+from .db import connect, log
 from .matrix import ASSETS, HORIZONS, NEUTRAL_BAND, build
 from .models import active_model
 
@@ -26,7 +26,10 @@ def history(conn: sqlite3.Connection, start: date, end: date, step_days: int = 7
             model: str | None = None) -> dict[str, list[tuple[str, float, int]]]:
     """Weekly matrix snapshots from start→end, as (date, net, n_calls) runs per cell. N/A cells carry net=0."""
     series: dict[str, list[tuple[str, float, int]]] = {f"{a}:{h}": [] for a in ASSETS for h in HORIZONS}
+    weeks = (end - start).days // step_days + 1
+    log(f"pine: history {start} → {end}, {weeks} weekly point-in-time matrices")
     d = start
+    i = 0
     while d <= end:
         m = build(conn, today=d, write=False, model=model)
         for k, cell in m["cells"].items():
@@ -35,6 +38,10 @@ def history(conn: sqlite3.Connection, start: date, end: date, step_days: int = 7
             if not s or abs(s[-1][1] - net) >= NET_STEP or LABEL_NUM[cell["label"]] != _label_num(s[-1][1]):
                 s.append((d.isoformat(), net, cell["n_calls"]))
         d += timedelta(days=step_days)
+        i += 1
+        if i % 10 == 0 or d > end:
+            log(f"pine: {i}/{weeks} weeks (at {m['cells']['BTC:SHORT']['label']}/{m['cells']['GOLD:SHORT']['label']}/"
+                f"{m['cells']['SPX:SHORT']['label']} short as of {min(d, end)})")
     return series
 
 
@@ -188,6 +195,7 @@ def generate(conn: sqlite3.Connection, years: int = 3, model: str | None = None)
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(render(ser, f"{end.isoformat()} · model {model}"))
     (ROOT / "data" / "matrix_history.json").write_text(json.dumps({"model": model, "series": ser}, indent=1))
+    log(f"pine: wrote {OUT.relative_to(ROOT)} + data/matrix_history.json ({sum(len(v) for v in ser.values())} runs)")
     return OUT
 
 

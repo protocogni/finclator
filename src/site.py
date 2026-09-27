@@ -43,7 +43,8 @@ def build(conn: sqlite3.Connection, model: str | None = None) -> dict:
               ORDER BY k.called_at DESC LIMIT 1""", model)
     matrix_p = ROOT / "data" / "matrix.json"
     m = json.loads(matrix_p.read_text()) if matrix_p.exists() else {"cells": {}}
-    cells = {k: {"label": v["label"], "net": v["net"], "n": v["n_calls"], "top_share": v.get("top_share", 0)}
+    cells = {k: {"label": v["label"], "net": v["net"], "n": v["n_calls"], "accounts": v.get("n_accounts", v["n_calls"]),
+                 "top_share": v.get("top_share", 0)}
              for k, v in m.get("cells", {}).items()}
     out = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="minutes"),
