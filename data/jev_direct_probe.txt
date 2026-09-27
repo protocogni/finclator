@@ -1,0 +1,56 @@
+
+=== workers=2 rc=0
+route=direct model=jev-latest gold=data/labels_holdout.jsonl n=100 workers=2
+
+100 answered, 0 errors, wall 12.9s, 464 tw/min, median latency 0.25s, input tokens 155,891 (≈ $0.0065)
+
+  thr  is_call   prec    rec     F1    dir    hor  both
+  0.3    0.980   0.82   1.00   0.90   0.90   0.70    10
+  0.4    0.980   0.89   0.89   0.89   0.89   0.67     9
+  0.5    0.960   0.86   0.67   0.75   1.00   0.71     7
+  0.6    0.950   1.00   0.44   0.62   1.00   0.60     5
+  0.7    0.940   1.00   0.33   0.50   1.00   0.50     4
+  0.8    0.930   1.00   0.22   0.36   1.00   0.33     3
+
+
+=== workers=8 rc=0
+route=direct model=jev-latest gold=data/labels_holdout.jsonl n=100 workers=8
+
+100 answered, 0 errors, wall 3.4s, 1772 tw/min, median latency 0.26s, input tokens 155,891 (≈ $0.0065)
+
+  thr  is_call   prec    rec     F1    dir    hor  both
+  0.3    0.980   0.82   1.00   0.90   0.90   0.70    10
+  0.4    0.970   0.80   0.89   0.84   0.89   0.67     9
+  0.5    0.960   0.86   0.67   0.75   1.00   0.71     7
+  0.6    0.950   1.00   0.44   0.62   1.00   0.60     5
+  0.7    0.940   1.00   0.33   0.50   1.00   0.50     4
+  0.8    0.920   1.00   0.11   0.20   1.00   1.00     1
+
+
+=== workers=16 rc=0
+route=direct model=jev-latest gold=data/labels_holdout.jsonl n=100 workers=16
+
+100 answered, 0 errors, wall 1.8s, 3335 tw/min, median latency 0.26s, input tokens 155,891 (≈ $0.0065)
+
+  thr  is_call   prec    rec     F1    dir    hor  both
+  0.3    0.980   0.82   1.00   0.90   0.90   0.70    10
+  0.4    0.970   0.80   0.89   0.84   0.89   0.67     9
+  0.5    0.960   0.86   0.67   0.75   1.00   0.71     7
+  0.6    0.950   1.00   0.44   0.62   1.00   0.60     5
+  0.7    0.940   1.00   0.33   0.50   1.00   0.50     4
+  0.8    0.920   1.00   0.11   0.20   1.00   1.00     1
+
+
+=== workers=32 rc=0
+route=direct model=jev-latest gold=data/labels_holdout.jsonl n=100 workers=32
+
+100 answered, 0 errors, wall 1.0s, 5726 tw/min, median latency 0.27s, input tokens 155,891 (≈ $0.0065)
+
+  thr  is_call   prec    rec     F1    dir    hor  both
+  0.3    0.980   0.82   1.00   0.90   0.90   0.70    10
+  0.4    0.970   0.80   0.89   0.84   0.89   0.67     9
+  0.5    0.960   0.86   0.67   0.75   1.00   0.71     7
+  0.6    0.950   1.00   0.44   0.62   1.00   0.60     5
+  0.7    0.940   1.00   0.33   0.50   1.00   0.50     4
+  0.8    0.920   1.00   0.11   0.20   1.00   1.00     1
+
