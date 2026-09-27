@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-09-27T20:09+00:00",
+ "generated_at": "2026-09-27T21:29+00:00",
  "accounts": 98,
  "tweets": 156496,
  "from": "2017",
@@ -8,12 +8,12 @@
  "outcomes": 7776,
  "results": {
   "CORRECT": 3747,
-  "PARTIAL": 2274,
-  "WRONG": 1755
+  "PARTIAL": 2018,
+  "WRONG": 2011
  },
  "hit_by_horizon": {
   "MEDIUM": {
-   "rate": 0.71,
+   "rate": 0.705,
    "baseline": 0.811,
    "n": 2135
   },
@@ -23,13 +23,13 @@
    "n": 1332
   },
   "SHORT": {
-   "rate": 0.548,
+   "rate": 0.521,
    "baseline": 0.619,
    "n": 4309
   }
  },
  "scored_accounts": 40,
- "trust_lo": 0.27,
+ "trust_lo": 0.24,
  "trust_hi": 0.83,
  "schools": [
   {
@@ -56,66 +56,66 @@
  "matrix": {
   "BTC:SHORT": {
    "label": "BUY",
-   "net": 0.45,
+   "net": 0.462,
    "n": 169,
    "accounts": 29,
-   "top_share": 0.068
+   "top_share": 0.07
   },
   "BTC:MEDIUM": {
    "label": "BUY",
-   "net": 0.752,
+   "net": 0.738,
    "n": 485,
    "accounts": 40,
-   "top_share": 0.056
+   "top_share": 0.053
   },
   "BTC:LONG": {
    "label": "BUY",
-   "net": 0.671,
+   "net": 0.669,
    "n": 1391,
    "accounts": 51,
    "top_share": 0.041
   },
   "GOLD:SHORT": {
    "label": "NEUTRAL",
-   "net": 0.099,
+   "net": 0.098,
    "n": 54,
    "accounts": 21,
-   "top_share": 0.105
+   "top_share": 0.1
   },
   "GOLD:MEDIUM": {
    "label": "BUY",
-   "net": 0.787,
+   "net": 0.79,
    "n": 297,
    "accounts": 32,
-   "top_share": 0.082
+   "top_share": 0.079
   },
   "GOLD:LONG": {
    "label": "BUY",
-   "net": 0.697,
+   "net": 0.703,
    "n": 894,
    "accounts": 50,
-   "top_share": 0.051
+   "top_share": 0.05
   },
   "SPX:SHORT": {
    "label": "SELL",
-   "net": -0.211,
+   "net": -0.193,
    "n": 59,
    "accounts": 15,
-   "top_share": 0.138
+   "top_share": 0.137
   },
   "SPX:MEDIUM": {
    "label": "NEUTRAL",
-   "net": 0.015,
+   "net": 0.023,
    "n": 171,
    "accounts": 36,
-   "top_share": 0.063
+   "top_share": 0.06
   },
   "SPX:LONG": {
    "label": "BUY",
-   "net": 0.253,
+   "net": 0.246,
    "n": 250,
    "accounts": 40,
-   "top_share": 0.059
+   "top_share": 0.058
   }
  },
  "matrix_generated_at": "2026-09-27",
