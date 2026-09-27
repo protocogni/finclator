@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import audit, db, score
+from . import audit, db, matrix, score
 from .db import LOG_PATH as LOG
 from .db import connect, log
 from .gate import THRESHOLD as GATE_THRESHOLD
@@ -417,13 +417,16 @@ def page_accounts(conn) -> str:
     B = [f"<h2>Trust per account × asset × horizon <small>· model {e(model)}</small></h2>",
          "<p class=help>Each account is scored separately per asset and horizon; the matrix weights a call by the score of the cell it lands in, "
          "never by one number per account. Cell = shrunk hit rate <b>(hits + 5) / (n + 10)</b> over matured calls (SHORT 90d, MEDIUM 365d, LONG 730d); "
-         "hits: CORRECT=1, PARTIAL=0.5, WRONG=0, ±0.25 when a stated price target hit/missed. Margins: per-asset and per-horizon aggregates; "
-         "corner: overall. Grey = no matured outcome → the 0.5 prior is used, and the matrix falls back specific → asset → overall → 0.5. "
+         "hits: CORRECT=1, PARTIAL=0.5, WRONG=0, ±0.25 when a stated price target hit/missed. Rows = asset, columns = horizon; "
+         "the right column pools each asset over all horizons, the bottom row pools each horizon over all assets, the corner pools "
+         "everything. Click an account in the ranking to jump to and highlight its grid. Grey = no matured outcome → the 0.5 prior is used, and the matrix falls back specific → asset → overall → 0.5. "
          "Colour: red ≤0.3 · neutral 0.5 · green ≥0.7.</p>",
          "<style>.tg{display:inline-block;vertical-align:top;margin:0 18px 18px 0;background:#181b22;border:1px solid #2a2f3a;border-radius:8px;padding:10px 12px;min-width:330px}"
          ".tg table{font-size:12px}.tg td,.tg th{text-align:center;width:66px;height:40px;padding:2px 4px}.tg th{background:#1d2129;cursor:default}"
          ".tg td.agg{background:#22262f;color:#bbb}.tg .hd{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}"
-         ".tg details{margin-top:6px}.tg details table{font-size:11px}.tg details td{text-align:left;width:auto;height:auto}</style>"]
+         ".tg details{margin-top:6px}.tg details table{font-size:11px}.tg details td{text-align:left;width:auto;height:auto}"
+         ".tg{scroll-margin-top:70px}.tg:target{border-color:#4c9aff;box-shadow:0 0 0 3px rgba(76,154,255,.45);background:#1c2333}"
+         ".tg:target .hd b{color:#fff;text-decoration:underline}</style>"]
 
     B.append("<h3>Ranking <small>(overall = all cells pooled; sortable)</small></h3><table class=sortable><thead><tr><th>account</th><th>school</th>"
              "<th title='calls by this model, matured or not'>calls</th><th title='matured calls'>n</th><th title='Σ points over matured calls: CORRECT 1, PARTIAL 0.5, WRONG 0, ±0.25 target hit/miss'>points</th><th title='(points + 5) / (n + 10) — all cells pooled'>overall</th>"
@@ -451,10 +454,12 @@ def page_accounts(conn) -> str:
         ovs = f"overall <b>{ov['score']:.3f}</b> · n={ov['n']}" if ov else "<span style='color:#888'>no matured outcomes · prior 0.5</span>"
         B.append(f"<div class=tg id='acc-{e(h)}'><div class=hd><a href='https://x.com/{e(h)}' style='color:#9ecbff'><b>@{e(h)}</b></a>"
                  f"<small>{e(a['school'] or '')} · {n_calls.get(h, 0)} calls</small></div>"
-                 f"<table><thead><tr><th></th><th>SHORT<br><small>0–3m</small></th><th>MEDIUM<br><small>3–12m</small></th><th>LONG<br><small>1–5y</small></th><th class=agg>asset</th></tr></thead><tbody>")
+                 f"<table><thead><tr><th></th><th>SHORT<br><small>0–3m</small></th><th>MEDIUM<br><small>3–12m</small></th><th>LONG<br><small>1–5y</small></th>"
+                 "<th class=agg title='this asset pooled over all three horizons'><small>all<br>horizons</small></th></tr></thead><tbody>")
         for x in ASSETS:
             B.append(f"<tr><th>{x}</th>" + "".join(cell(h, x, hz) for hz in HZ) + margin(h, x, "*") + "</tr>")
-        B.append("<tr><th class=agg>horizon</th>" + "".join(margin(h, "*", hz) for hz in HZ) + f"<td class=agg><small>{ovs}</small></td></tr>")
+        B.append("<tr><th class=agg title='this horizon pooled over all three assets'><small>all<br>assets</small></th>"
+                 + "".join(margin(h, "*", hz) for hz in HZ) + f"<td class=agg title='all cells pooled'><small>{ovs}</small></td></tr>")
         B.append("</tbody></table>" + calls_list(h) + "</div>")
     B.append("</div>")
     return _page("accounts", "".join(B), "/accounts")
@@ -472,88 +477,136 @@ def page_architecture(conn) -> str:
                        (SELECT count(*) FROM outcomes o JOIN calls c ON c.id=o.call_id WHERE c.model=?) outs,
                        (SELECT count(*) FROM accounts) acc FROM tweets""", model, model, model, model)
     pct = lambda a, b: f"{100 * a / b:.0f}%" if b else "–"  # noqa: E731
-    B = [f"<h2>Data flow <small>· counts for the active model {e(model)}</small></h2><pre class=mono>"
-         f"""twitterapi.io ──► fetch.py ──────────► tweets            {f['t']:>8,}  originals only (replies / RTs rejected at insert)
-                    {f['acc']} accounts, 3y   │                       search since watermark; >1,000 orig/yr → asset keywords in query
-                                    ▼
-                     prefilter.py  regex, free ──► relevant=1    {f['rel']:>8,}  ({pct(f['rel'], f['t'])})  "mentions BTC / GOLD / SPX at all?"
-                                    ▼
-                     classify.py   LLM, $ ──────► classified=1  {f['cls']:>8,}  ({pct(f['cls'], f['rel'])} of relevant)  "explicit, falsifiable call?"
-                                    │                calls          {f['calls']:>8,}  from {f['ct']:,} tweets
-                                    ▼
-   Yahoo daily ─► prices.py ─► evaluate.py ─────► outcomes        {f['outs']:>8,}  matured calls only
-                                    ▼
-                     score.py      trust per (account, asset, horizon), shrunk toward 0.5
-                                    ▼
-                     matrix.py     3×3 = Σ trust × confidence × recency-decay  ─► data/matrix.json
-                                    ▼
-                     audit.py · admin.py · site.py · pine.py (verification page, this panel, public site.json, TradingView script — publishing on hold)"""
-         "</pre>"]
+    NB, MW = matrix.NEUTRAL_BAND, matrix.MIN_WEIGHT
+    B = ["<style>.doc{max-width:980px;line-height:1.55}.doc p,.doc li{color:#d6dae3}.doc h2{margin-top:30px;padding-top:10px;"
+         "border-top:1px solid #2a2f3a;font-size:17px}.doc code{background:#262b36;padding:1px 5px;border-radius:4px;font-size:12.5px}"
+         ".st{display:grid;grid-template-columns:110px 1fr;gap:6px 14px;background:#1c2029;border:1px solid #2e3441;border-radius:8px;"
+         "padding:12px 16px;margin:8px 0 14px}.st dt{color:#9aa;font-size:12px;text-transform:uppercase;letter-spacing:.04em;padding-top:2px}"
+         ".st dd{margin:0}.st dd .n{font-variant-numeric:tabular-nums;font-weight:600;color:#fff}"
+         ".flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:8px 0 4px}.flow a{flex:1 1 150px;min-width:150px;background:#1c2029;"
+         "border:1px solid #2e3441;border-radius:8px;padding:10px 12px;text-decoration:none;color:inherit}.flow a:hover{border-color:#4c9aff}"
+         ".flow b{display:block;font-size:13px;color:#9ecbff}.flow .n{display:block;font-size:20px;font-weight:700;color:#fff;margin:2px 0}"
+         ".flow small{color:#9aa}.fm{width:100%}.fm td:first-child{white-space:nowrap;font-weight:600;color:#fff}"
+         ".fm td.f{font-family:ui-monospace,monospace;font-size:12.5px;white-space:nowrap;color:#ffd479}"
+         ".doc table td,.doc table th{padding:6px 10px;vertical-align:top}.pat td.mono{white-space:normal;overflow-wrap:anywhere;font-size:11.5px;color:#c9d1e0}"
+         "@media (max-width:700px){.st{grid-template-columns:1fr}.fm td.f{white-space:normal}}</style><div class=doc>"]
 
-    B.append("<h2>Stage 1 — prefilter <small>(src/prefilter.py) · generous: recall over precision</small></h2>"
-             "<p>Pure regex, EN+TR. Text is HTML-unescaped and URLs stripped first. Word boundaries are Turkish-aware "
-             "(Python's <code>\\b</code> is ASCII-only, so <i>altının</i> would otherwise never match). A false positive costs a fraction "
-             "of a cent at stage 2; a false negative is a lost call forever.</p><table><tr><th>asset</th><th>pattern (live from code)</th></tr>")
+    def stat(n):
+        return f"<span class=n>{n:,}</span>"
+
+    # ── 1. Pipeline overview: one card per stage, live counts ──────────────────────────────────────────────
+    B.append(f"<h2 style='border:0;margin-top:4px'>Pipeline <small>· live counts for the active model <code>{e(model)}</code></small></h2>"
+             "<p class=help>Left to right, every day at 06:00: each stage only ever adds rows — nothing is re-fetched or re-labeled. "
+             "Click a card to jump to its section.</p><div class=flow>"
+             f"<a href='#s-fetch'><b>1 · fetch</b><span class=n>{f['t']:,}</span><small>tweets · {f['acc']} accounts · 3 y · originals only</small></a>"
+             f"<a href='#s-prefilter'><b>2 · prefilter</b><span class=n>{f['rel']:,}</span><small>mention an asset · {pct(f['rel'], f['t'])} of tweets · regex, free</small></a>"
+             f"<a href='#s-gate'><b>3 · gate + classify</b><span class=n>{f['calls']:,}</span><small>calls from {f['ct']:,} tweets · {pct(f['cls'], f['rel'])} of relevant labeled</small></a>"
+             f"<a href='#s-eval'><b>4 · evaluate</b><span class=n>{f['outs']:,}</span><small>matured outcomes vs Yahoo closes</small></a>"
+             "<a href='#s-trust'><b>5 · trust</b><span class=n>3×3</span><small>per account · asset · horizon</small></a>"
+             "<a href='#s-matrix'><b>6 · matrix</b><span class=n>3×3</span><small>BUY / NEUTRAL / SELL → site, panel, Pine</small></a></div>")
+
+    # ── 2. Stages ──────────────────────────────────────────────────────────────────────────────────────────
+    B.append(f"<h2 id=s-fetch>1 · Fetch <small>src/fetch.py</small></h2><dl class=st>"
+             f"<dt>source</dt><dd>twitterapi.io <code>advanced_search</code>, one exact <code>since_time</code>/<code>until_time</code> window per account "
+             f"from its <code>last_fetch_at</code> watermark (6 h overlap). {f['acc']} curated accounts, 3-year backfill.</dd>"
+             "<dt>rule</dt><dd><b>Originals only.</b> Replies and retweets are rejected three times: in the API query, in the response filter, "
+             "and at the DB insert (so CSV imports obey it too).</dd>"
+             "<dt>heavy posters</dt><dd>&gt;1,000 originals/yr are <i>sampled</i>: the asset keywords go into the search query so the vendor bills only "
+             "for tweets that can matter.</dd>"
+             f"<dt>output</dt><dd><code>tweets</code> — {stat(f['t'])} rows.</dd></dl>")
+
+    B.append("<h2 id=s-prefilter>2 · Prefilter <small>src/prefilter.py · stage 1, generous</small></h2><dl class=st>"
+             "<dt>question</dt><dd>“Does the tweet mention BTC, GOLD or SPX at all?” — recall over precision: a false positive costs a fraction of a "
+             "cent at the next stage, a false negative is a lost call forever.</dd>"
+             "<dt>how</dt><dd>Pure regex, EN + TR. Text is HTML-unescaped and URLs stripped first. Word boundaries are Turkish-aware "
+             "(Python's <code>\\b</code> is ASCII-only, so <i>altının</i> would otherwise never match).</dd>"
+             "<dt>ambiguity</dt><dd><i>hisse / borsa / endeks</i> alone usually mean BIST, so they count as SPX only with a US cue "
+             "(ABD, Fed, Nasdaq, Tesla…) <b>and</b> no BIST cue (THY, Aselsan, xu100…).</dd>"
+             f"<dt>output</dt><dd><code>tweets.relevant</code> + <code>assets_hint</code> — {stat(f['rel'])} rows ({pct(f['rel'], f['t'])}). "
+             f"Spot-check the rejects on <a href='{_u('/audit')}' style='color:#9ecbff'>Audit → “prefilter dropped”</a>.</dd></dl>"
+             "<details><summary><small>patterns, live from code</small></summary><table class=pat><tr><th>asset</th><th>regex</th></tr>")
     for a in ASSETS:
-        B.append(f"<tr><td>{a}</td><td class=mono><small>{e(_ASSET_PATTERNS[a].pattern)}</small></td></tr>")
-    B.append("</table><p>Disambiguation: <i>hisse / borsa / endeks</i> alone usually means BIST, so they count as SPX only with a "
-             "US cue (ABD, Fed, Nasdaq, Tesla…) <b>and</b> no BIST cue (THY, Aselsan, xu100…). "
-             "Result is stored as <code>tweets.relevant</code> + <code>assets_hint</code>. "
-             f"Check it on <a href='{_u('/audit')}' style='color:#9ecbff'>Audit → “prefilter dropped”</a> sample.</p>")
+        B.append(f"<tr><td>{a}</td><td class=mono>{e(_ASSET_PATTERNS[a].pattern)}</td></tr>")
+    B.append("</table></details>")
 
-    B.append("<h2>Stage 2a — Jev gate <small>(src/gate.py) · decision model</small></h2>"
-             "<p>Every asset-mentioning tweet is first scored by TypeSafe's Jev decision model (direct API, no text output): "
-             "the classifier rules are decomposed into typed questions — <code>is_call</code> (probability) and a per-asset stance "
-             f"choice (none/up/down/neutral). A tweet passes when <code>p_call ≥ {GATE_THRESHOLD}</code> and at least one asset has a "
-             "stance. Measured on the frontier-labeled holdout: is_call 0.98, call recall 1.00, F1 0.90 at this threshold; ~0.3 s "
-             "per tweet, ~$0.00007 each. Passing tweets go to the text model below; blocked tweets are stored as non-calls. "
-             "Results live in <code>gate</code> (one row per tweet and Jev version); the probability is copied to "
-             "<code>calls.gate_p</code> and the Audit tab flags calls with <code>low-gate</code> (p &lt; 0.5). The backlog was labeled "
-             "without the gate; it applies to tweets fetched from now on and stores its labels under the text model's tag.</p>")
-    B.append("<h2>Stage 2b — text classifier <small>(src/classify.py) · strict</small></h2>"
-             f"<p>Local open-weights model via Ollama (the tag is defined once in <code>src/models.py</code>; active: <code>{e(model)}</code>), "
-             f"{BATCH_SIZE} tweets per request, temperature 0, JSON output, thinking off. The Anthropic and OpenAI-compatible paths share the same "
-             "prompt and parser. Must answer “is this an explicit, falsifiable call?” — past-move reports, news, charts "
-             "without opinion, generic macro talk → <code>is_call=false</code>. Per asset it returns direction (BUY/SELL/NEUTRAL), horizon, "
-             "confidence, price target in USD, and an <b>exact quote</b> from the tweet that justifies the label (auditable). "
-             "Every label is tagged with its model in <code>calls.model</code> / <code>classified_by</code>; models never overwrite each other, "
-             "and every page counts one model at a time.</p>"
-             "<table><tr><th>horizon</th><th>meaning (spec)</th><th>evaluated after</th><th>inferred when unstated</th></tr>"
+    B.append(f"<h2 id=s-gate>3 · Gate + classify <small>src/gate.py · src/classify.py · stage 2, strict</small></h2>"
+             "<p>Two models in series answer “is this an <b>explicit, falsifiable call</b>?”. Past-move reports, news, charts without opinion "
+             "and generic macro talk are <code>is_call=false</code>.</p><dl class=st>"
+             "<dt>3a · gate</dt><dd>TypeSafe <b>Jev</b> decision model (typed probabilities, no text). The classifier rules are decomposed into "
+             f"questions — <code>is_call</code> probability and a per-asset stance (none/up/down/neutral). Pass when <code>p_call ≥ {GATE_THRESHOLD}</code> "
+             "and at least one asset has a stance. Holdout: is_call 0.98, call recall 1.00, F1 0.90; ~0.3 s and ~$0.00007 per tweet. "
+             "Blocked tweets are stored as non-calls. Live for tweets fetched since 2026-09-23; the backlog was labeled without it.</dd>"
+             f"<dt>3b · classifier</dt><dd>Local open-weights model via Ollama (tag defined once in <code>src/models.py</code>, active <code>{e(model)}</code>), "
+             f"{BATCH_SIZE} tweets per request, temperature 0, JSON output, thinking off. Per asset it returns <b>direction</b> (BUY/SELL/NEUTRAL), "
+             "<b>horizon</b>, <b>confidence</b>, <b>price target</b> in USD and an <b>exact quote</b> from the tweet that justifies the label.</dd>"
+             "<dt>model dimension</dt><dd>Every label carries its model in <code>calls.model</code> / <code>classified_by</code>. Models never overwrite "
+             "each other; every page counts one model at a time.</dd>"
+             f"<dt>output</dt><dd><code>calls</code> — {stat(f['calls'])} rows from {f['ct']:,} tweets; <code>gate</code> rows carry the probability, "
+             "copied to <code>calls.gate_p</code> (Audit flags <code>low-gate</code> below 0.5).</dd></dl>"
+             "<table><tr><th>horizon</th><th>meaning (spec)</th><th>evaluated after</th><th>inferred when the tweet doesn't say</th></tr>"
              f"<tr><td>SHORT</td><td>0–3 months</td><td>{MATURITY_DAYS['SHORT']} d</td><td>technical / level talk, swing</td></tr>"
              f"<tr><td>MEDIUM</td><td>3–12 months</td><td>{MATURITY_DAYS['MEDIUM']} d</td><td>default</td></tr>"
              f"<tr><td>LONG</td><td>1–5 years</td><td>{MATURITY_DAYS['LONG']} d</td><td>macro / structural / cycle thesis</td></tr></table>")
 
-    B.append("<h2>Evaluation, trust, matrix</h2><ul>"
-             "<li><b>Prices</b>: Yahoo daily close — BTC-USD, GC=F (COMEX front month), ^GSPC — stored in <code>prices</code> from 2020.</li>"
-             "<li><b>Outcome</b>: return from entry close to exit close at maturity vs a flat band of 0.5σ·√days (trailing-1y daily vol). "
-             "CORRECT=1, PARTIAL (predicted move, market flat)=0.5, WRONG=0. Price target: +0.25 if any close touched it within the horizon, −0.25 if not.</li>"
-             "<li><b>Trust</b> = (Σhits + 5) / (n + 10) per (account, asset, horizon); fallbacks specific → asset → overall → 0.5 prior. "
-             "Point-in-time: only outcomes matured by the as-of date count, so history never sees the future.</li>"
-             "<li><b>Matrix</b>: per cell, each call in the window weighs trust × confidence × 2<sup>−age/(window/3)</sup>; "
-             "net = (buy−sell)/total → BUY &gt; +0.15, SELL &lt; −0.15, else NEUTRAL; N/A when total weight &lt; 0.3. "
-             "Everyone contributes; noisy accounts are outweighed, not filtered.</li>"
-             f"<li><b>Schools</b> (accounts.school) get their own sub-label per cell, shown on <a href='{_u('/matrix')}' style='color:#9ecbff'>Matrix</a>.</li></ul>")
+    B.append(f"<h2 id=s-eval>4 · Evaluate <small>src/prices.py · src/evaluate.py</small></h2><dl class=st>"
+             "<dt>prices</dt><dd>Yahoo daily close: <code>BTC-USD</code>, <code>GC=F</code> (COMEX front month, not spot), <code>^GSPC</code>; "
+             "stored in <code>prices</code> from 2020.</dd>"
+             "<dt>when</dt><dd>A call matures at entry + 90 / 365 / 730 days (the table above). Entry = close on the tweet date, exit = close at maturity.</dd>"
+             f"<dt>output</dt><dd><code>outcomes</code> — {stat(f['outs'])} matured calls, each with return, result and target hit/miss.</dd></dl>"
+             "<table class=fm>"
+             "<tr><td>return</td><td class=f>r = exit / entry − 1</td><td>signed; SELL calls are judged on −r.</td></tr>"
+             "<tr><td>flat band</td><td class=f>b = 0.5 · σ · √days</td><td>σ = trailing-1-year daily volatility of that asset, so “flat” scales with the "
+             "asset and the horizon — a 2 % move is noise for BTC over 90 d.</td></tr>"
+             "<tr><td>result</td><td class=f>CORRECT = 1 · PARTIAL = 0.5 · WRONG = 0</td><td>CORRECT: market moved the predicted way beyond b. PARTIAL: predicted a move, "
+             "market stayed inside ±b (or vice versa). WRONG: moved the opposite way beyond b.</td></tr>"
+             "<tr><td>price target</td><td class=f>±0.25</td><td>+0.25 if any close inside the horizon touched the stated level, −0.25 if none did. "
+             "A stated level is the most falsifiable claim an account makes.</td></tr></table>")
 
+    B.append("<h2 id=s-trust>5 · Trust <small>src/score.py</small></h2>"
+             "<p>Trust is a <b>cell-level</b> quantity: one score per (account, asset, horizon) — the "
+             f"<a href='{_u('/accounts')}' style='color:#9ecbff'>Accounts</a> tab shows it as a 3×3 grid per account.</p><table class=fm>"
+             "<tr><td>hits</td><td class=f>H = Σ result ± target credit</td><td>over the cell's matured calls, n of them.</td></tr>"
+             "<tr><td>trust</td><td class=f>T = (H + 5) / (n + 10)</td><td>a hit rate shrunk toward the 0.5 prior with a 10-call pseudo-sample: one lucky call "
+             "scores 0.55, not 1.0; a 50/100 record still outweighs it.</td></tr>"
+             "<tr><td>fallback</td><td class=f>cell → asset → account → 0.5</td><td>when a cell has no matured outcome the matrix uses the account's "
+             "pooled score for that asset, then its overall score, then the prior.</td></tr>"
+             "<tr><td>point-in-time</td><td class=f>outcomes with exit ≤ as-of</td><td>any historical matrix (backtest, Pine history) only sees outcomes "
+             "that had matured by that date — it never weights the past with knowledge of the future.</td></tr></table>")
+
+    B.append(f"<h2 id=s-matrix>6 · Matrix <small>src/matrix.py</small></h2>"
+             "<p>Nine cells: {BTC, GOLD, SPX} × {SHORT, MEDIUM, LONG}. Everyone on the roster contributes; noisy accounts are outweighed, not filtered.</p>"
+             "<table class=fm>"
+             "<tr><td>window</td><td class=f>called_at ≥ today − maturity</td><td>only calls inside the horizon's window count (90 / 365 / 730 d); the latest call "
+             "per account dominates, older ones from the same account decay.</td></tr>"
+             "<tr><td>weight</td><td class=f>w = T · confidence · 2<sup>−age / (window/3)</sup></td><td>trust × classifier confidence × recency; half-life is a third "
+             "of the window, so a 90-day-old SHORT call weighs an eighth.</td></tr>"
+             "<tr><td>net</td><td class=f>net = (Σw<sub>BUY</sub> − Σw<sub>SELL</sub>) / Σw</td><td>−1 … +1.</td></tr>"
+             f"<tr><td>label</td><td class=f>BUY if net &gt; +{NB} · SELL if net &lt; −{NB} · else NEUTRAL</td><td>N/A when Σw &lt; {MW} (not enough weighted evidence).</td></tr>"
+             "<tr><td>concentration</td><td class=f>top_share = max w / Σw</td><td>shown amber ≥ 50 % — one account carrying half a cell is a warning, not a signal.</td></tr>"
+             f"<tr><td>schools</td><td class=f>same, per school</td><td>each <code>accounts.school</code> gets its own sub-label per cell on <a href='{_u('/matrix')}' style='color:#9ecbff'>Matrix</a>.</td></tr></table>"
+             "<p>Outputs: <code>data/matrix.json</code> → public <code>site.json</code>, this panel, the Audit page, the TradingView script (publishing on hold).</p>")
+
+    # ── 3. Caveats & files ────────────────────────────────────────────────────────────────────────────────
     B.append("<h2>Known weak spots</h2><ul>"
-             "<li>Stage 1 can't catch calls that name no asset (“this is the top” under a chart image).</li>"
+             "<li>Stage 2 can't catch calls that name no asset (“this is the top” under a chart image).</li>"
              "<li>Horizon inference on terse Turkish tweets is the least reliable field.</li>"
              "<li>Labels are one model's reading. Production config vs a 120-tweet frontier-labeled holdout: is-call 97 %, direction 88 %, "
-             "horizon 88 % — on only 15 gold calls, so treat those as rough. Per-config numbers: <code>data/tune_variants.txt</code>. "
-             "Since 2026-09-23 the Jev gate decides is_call for new tweets (holdout is_call 98 %, recall 100 %); the text model "
-             "only labels direction/horizon/quote on what passes.</li>"
-             "<li>Sampled accounts (&gt;1,000 orig/yr) see ~10% of their tweets — evenly spread, but sparse.</li></ul>")
+             "horizon 88 % — on only 15 gold calls, so treat those as rough (<code>data/tune_variants.txt</code>). Since 2026-09-23 the Jev gate "
+             "decides is_call for new tweets (holdout is_call 98 %, recall 100 %); the text model only labels what passes.</li>"
+             "<li>Sampled accounts (&gt;1,000 orig/yr) see ~10 % of their tweets — evenly spread, but sparse.</li>"
+             "<li>The roster as a whole underperforms always-BUY at every horizon (Matrix tab, “hit rate vs baseline”).</li></ul>")
 
     B.append("<h2>Files</h2><table><tr><th>file</th><th>role</th></tr>"
              "<tr><td class=mono>roster.yaml</td><td>accounts, school, language</td></tr>"
              "<tr><td class=mono>src/db.py</td><td>schema in SQLite dialect, runs on SQLite locally and Postgres (Neon) hosted; log()</td></tr>"
-             "<tr><td class=mono>src/fetch.py</td><td>twitterapi.io: advanced_search with exact since_time windows per account (last_fetch_at watermark), asset keywords in the query for heavy posters, credit floor</td></tr>"
-             "<tr><td class=mono>src/prefilter.py</td><td>stage 1</td></tr><tr><td class=mono>src/classify.py</td><td>stage 2</td></tr>"
-             "<tr><td class=mono>src/gate.py</td><td>stage 2a — Jev is_call gate (TypeSafe direct API), table <code>gate</code></td></tr>"
-             "<tr><td class=mono>src/prices.py · evaluate.py · score.py · matrix.py</td><td>outcomes → trust → 3×3</td></tr>"
-             "<tr><td class=mono>src/audit.py · admin.py · pine.py</td><td>verification page, this site, TradingView script</td></tr>"
+             "<tr><td class=mono>src/fetch.py</td><td>stage 1 — twitterapi.io windows per account, keyword query for heavy posters, credit floor</td></tr>"
+             "<tr><td class=mono>src/prefilter.py</td><td>stage 2 — asset-mention regex</td></tr>"
+             "<tr><td class=mono>src/gate.py · classify.py</td><td>stage 3 — Jev is_call gate (table <code>gate</code>), text classifier</td></tr>"
+             "<tr><td class=mono>src/prices.py · evaluate.py · score.py · matrix.py</td><td>stages 4–6 — outcomes → trust → 3×3</td></tr>"
+             "<tr><td class=mono>src/audit.py · admin.py · site.py · pine.py</td><td>verification page, this panel, public site.json, TradingView script</td></tr>"
              "<tr><td class=mono>src/run.py</td><td>the pipeline: fetch → classify → prices → evaluate → score → matrix → audit → pine → site</td></tr>"
              "<tr><td class=mono>scripts/daily.sh</td><td>launchd com.finclator.daily 06:00 local: src.run → deploy site.json → commit</td></tr>"
-             "<tr><td class=mono>scripts/backfill.py</td><td>parallel fetch of every account from its watermark (8 workers)</td></tr></table>")
+             "<tr><td class=mono>scripts/backfill.py</td><td>parallel fetch of every account from its watermark (8 workers)</td></tr></table></div>")
     return _page("architecture", "".join(B), "/architecture")
 
 
