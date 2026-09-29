@@ -617,7 +617,7 @@ def page_architecture(conn) -> str:
              "and generic macro talk are <code>is_call=false</code>.</p><dl class=st>"
              "<dt>3a · gate</dt><dd>TypeSafe <b>Jev</b> decision model (typed probabilities, no text). The classifier rules are decomposed into "
              f"questions — <code>is_call</code> probability and a per-asset stance (none/up/down/neutral). Pass when <code>p_call ≥ {GATE_THRESHOLD}</code> "
-             "and at least one asset has a stance. Holdout: is_call 0.98, call recall 1.00, F1 0.90; ~0.3 s and ~$0.00007 per tweet. "
+             "and at least one asset has a stance. 1,000-tweet eval vs Fable 5.1: is_call recall 0.90 at this threshold; the hybrid keeps 20 % of tweets for the GPU and loses 2 pts of call recall vs ungated. ~0.24 s and ~$0.00006 per tweet. "
              "Blocked tweets are stored as non-calls. Live for tweets fetched since 2026-09-23; the backlog was labeled without it.</dd>"
              f"<dt>3b · classifier</dt><dd>Local open-weights model via Ollama (tag defined once in <code>src/models.py</code>, active <code>{e(model)}</code>), "
              f"{BATCH_SIZE} tweets per request, temperature 0, JSON output, thinking off. Per asset it returns <b>direction</b> (BUY/SELL/NEUTRAL), "

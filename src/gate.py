@@ -2,9 +2,10 @@
 
 Jev answers typed questions with calibrated probabilities and no text, so it cannot produce `quote` or
 `price_target`; it sits in FRONT of the text classifier and decides which relevant tweets are worth a GPU call.
-Measured on the 100-tweet frontier holdout (scripts/score_jev.py): is_call 0.98 / recall 1.00 / F1 0.90 at
-p_call ≥ 0.3, 0.26 s latency, no rate-limit errors up to 32 workers on api.typesafe.ai (the Vercel gateway
-throttles at ~35 tw/min — do not route bulk through it).
+Measured on 1,000 English tweets vs Fable 5.1 labels (docs/JEV_EXPERIMENTS.md, scripts/compare_four.py): at
+p_call ≥ 0.2 the gate keeps 20 % of tweets and the hybrid loses 2 pts of call recall vs the ungated text model
+(0.77 vs 0.79) while precision rises 0.66 → 0.79; at 0.3 it lost 7 pts. 0.24 s latency, no rate-limit errors up to
+32 workers on api.typesafe.ai (the Vercel gateway throttles at ~35 tw/min — do not route bulk through it).
 
 Results live in `gate(tweet_id, model, p_call, stances, at)` keyed by the versioned Jev id, so a tweet is gated
 once per Jev version; `passes()` is the single rule the hybrid classifier applies.
@@ -24,7 +25,7 @@ from .db import log
 ROOT = Path(__file__).resolve().parent.parent
 URL = os.environ.get("JEV_URL", "https://api.typesafe.ai/v1/systemone")
 MODEL = os.environ.get("JEV_MODEL", "jev-latest")           # request alias; rows are stored under response.model
-THRESHOLD = float(os.environ.get("JEV_THRESHOLD", "0.3"))     # chosen from the sweep; 0.5 halves recall
+THRESHOLD = float(os.environ.get("JEV_THRESHOLD", "0.2"))     # 1,000-tweet sweep: 0.2 costs 2 pts recall, 0.3 cost 7, 0.5 halves it
 WORKERS = int(os.environ.get("JEV_WORKERS", "32"))
 MAX_TEXT = 3000
 ASSET_NAME = {"BTC": "Bitcoin (BTC)", "GOLD": "gold (altın, XAU)", "SPX": "the S&P 500 / US equities / Nasdaq (SPX)"}

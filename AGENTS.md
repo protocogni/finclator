@@ -13,8 +13,9 @@ Surfaces: **finclator.com** (public landing + method page, gated admin panel), `
   outcomes, 73 accounts scored). The 30B labels and the frontier labels (`claude-fable-5.1/interactive`) coexist as
   other model dimensions. **Never purge `calls`/`classified_by`/`trust`/`gate` rows of a non-active model.**
 - **Jev gate is live for new tweets only** (`src/gate.py`, TypeSafe direct API, `TYPESAFE_API_KEY`, ~3k tw/min,
-  32 workers, `p_call ≥ 0.3`): `classify_pending` gates every pending tweet, blocked ones are stored as non-calls,
-  passing ones (~17 %) go to Qwen. Labels stay under the Qwen tag (user decision: no relabel of the backlog;
+  32 workers, `p_call ≥ 0.2` since 2026-09-30 — the 1,000-tweet eval in `docs/JEV_EXPERIMENTS.md` showed 0.3 cost 7 pts
+  of recall, 0.2 costs 2): `classify_pending` gates every pending tweet, blocked ones are stored as non-calls,
+  passing ones (~20 %) go to Qwen. Labels stay under the Qwen tag (user decision: no relabel of the backlog;
   `FINCLATOR_GATE_TAG=1` would fork a `+jev` dimension, `FINCLATOR_GATE=0` disables the gate). `calls.gate_p`
   carries the probability; Audit flags `low-gate`.
 - **Roster underperforms always-BUY at every horizon** (measured on the plain Qwen labels: SHORT 55 % vs 62 %,

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import score
 from .db import connect, log
+from .gate import THRESHOLD as GATE_THRESHOLD
 from .models import active_model
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -135,7 +136,8 @@ def gather(conn, now: datetime | None = None, model: str | None = None, window_h
         cur = int(_one(conn, sql, *m, s_now)[0] or 0)
         prev = int(_one(conn, sql.replace(">= ?", f">= ? AND {col} < ?"), *m, s_prev, s_now)[0] or 0)
         act[key] = {"now": cur, "prev": prev}
-    act["gate_passed"] = int(_one(conn, "SELECT count(*) FROM gate WHERE at >= ? AND p_call >= 0.3", since_sp)[0] or 0)
+    act["gate_passed"] = int(_one(conn, "SELECT count(*) FROM gate WHERE at >= ? AND p_call >= ?", since_sp,
+                                  GATE_THRESHOLD)[0] or 0)
 
     prices = {}
     for a in ASSETS:

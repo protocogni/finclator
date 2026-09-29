@@ -239,7 +239,7 @@ shared calls here.
 ## Still to do
 
 - The two-noul horizon shape for Jev.
-- Gate threshold 0.3 → 0.2 in `src/gate.py`, then re-measure the daily pass rate.
+- ~~Gate threshold 0.3 → 0.2 in `src/gate.py`~~ done 2026-09-30; re-measure the daily pass rate after a week.
 - A Jev-only matrix from the full corpus (about 10 minutes and $3) next to the production matrix, as a talk
   artifact. The audit page has to tolerate NULL quotes first.
 - Adjudicate the 30 calls where Opus and Fable disagree. Whichever way they go, that is the noise floor of the
