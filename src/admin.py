@@ -396,10 +396,10 @@ def page_matrix(conn) -> str:
              "<tr><td>top</td><td class=f>max vote / w</td><td>the largest single account's share; amber ≥ 50 % means one account is carrying the "
              "cell — that is its view, not a consensus.</td></tr></table>")
 
-    B.append("<h2>Hit rate vs always-BUY <small>· same matured outcomes, target bonus excluded</small></h2>"
-             "<table><tr><th>horizon</th><th title='matured calls of the active model'>n</th>"
-             "<th title='CORRECT=1 PARTIAL=0.5 WRONG=0'>roster</th>"
-             "<th title='a BUY call on every one of these outcomes: market up=1, flat=0.5, down=0'>always-BUY</th><th>edge</th></tr>")
+    B.append("<h2>Are the influencers, as a group, better than “always Buy”? <small>· same matured calls, target bonus excluded</small></h2>"
+             "<table><tr><th>horizon</th><th title='matured calls of the active model, all accounts'>calls scored</th>"
+             "<th title='every matured call from every account: right 1, half-right 0.5, wrong 0, averaged'>all accounts, averaged</th>"
+             "<th title='the same calls, pretending each had said Buy: market up 1, flat 0.5, down 0'>“always Buy” rule</th><th>difference</th></tr>")
     hr = score.hit_rates(conn, active_model())
     for hz in HORIZONS:
         v = hr.get(hz)
@@ -409,11 +409,12 @@ def page_matrix(conn) -> str:
         B.append(f"<tr><td>{hz}</td><td class=num>{v['n']:,}</td><td class=num>{v['rate']:.1%}</td><td class=num>{v['baseline']:.1%}</td>"
                  f"<td class='num {'ok' if edge > 0.02 else 'err' if edge < -0.02 else 'warn'}'>{edge:+.1%}</td></tr>")
     B.append("</table><table class=fm>"
-             "<tr><td>roster</td><td class=f>Σ result / n</td><td>CORRECT = 1, PARTIAL = 0.5, WRONG = 0 over every matured call of the active model; "
-             "price-target credit excluded so both columns use the same scale.</td></tr>"
-             "<tr><td>always-BUY</td><td class=f>same outcomes, direction forced to BUY</td><td>market up = 1, flat = 0.5, down = 0.</td></tr>"
-             "<tr><td>edge</td><td class=f>roster − always-BUY</td><td>most of the covered period was a bull market, so a high hit rate alone is not "
-             "skill; only this column says whether the roster beat “just buy”. Green &gt; +2 pts, red &lt; −2 pts.</td></tr></table>")
+             "<tr><td>all accounts, averaged</td><td class=f>Σ result / n</td><td>every matured call from every account on the roster, scored right = 1, "
+             "half-right = 0.5, wrong = 0, then averaged. This is the group, not any one account (those are on the Accounts tab).</td></tr>"
+             "<tr><td>“always Buy” rule</td><td class=f>same calls, direction forced to BUY</td><td>pretend each of those calls had simply said Buy: "
+             "market went up = 1, flat = 0.5, down = 0. A rule with zero thought in it — the bar to clear.</td></tr>"
+             "<tr><td>difference</td><td class=f>group − “always Buy”</td><td>most of the covered period was a bull market, so a high first "
+             "column is not skill; only this column says whether the group beat “just buy”. Green &gt; +2 pts, red &lt; −2 pts.</td></tr></table>")
 
     B.append("<h2>Contributors per cell</h2><table class=fm>"
              "<tr><td>rows</td><td class=f>15 heaviest votes</td><td>one row per account — its latest call in the window.</td></tr>"

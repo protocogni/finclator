@@ -392,26 +392,27 @@ def render(d: dict, ext: dict | None, credits: float | None, P: list[tuple[str, 
     B.append(f"<div style='color:#8a8073;font-size:11px'>net = trust-weighted buy − sell share · accts = distinct voters (one vote per account per cell) · generated {_esc((mx['generated_at'] or '—')[:16])} UTC</div>")
 
     # trust / skill
-    B.append(_h2("🎯 Does the roster beat “just buy”?"))
+    B.append(_h2("🎯 Are the influencers, as a group, better than “always Buy”?"))
     hr = d["hit_rates"]
     edges = {h: hr[h]["rate"] - hr[h]["baseline"] for h in HORIZONS if h in hr}
     if edges:
         worst = min(edges.values())
         best = max(edges.values())
         if best <= 0:
-            verdict_line = (f"<b>No.</b> On every horizon the roster's own calls scored below a dumb “always Buy” on the same calls "
-                            f"(by {abs(worst):.0%} to {abs(best):.0%} points). The matrix is a read on what these accounts think, "
-                            "not evidence that they are right — a flip away from Buy is the informative event.")
+            verdict_line = (f"<b>No.</b> Averaged over all ~{fn['accounts']} accounts, their calls were right less often than a rule that "
+                            f"just says “Buy” every time on the same calls (by {abs(worst):.0%} to {abs(best):.0%} points). "
+                            "Most of the period was a bull market, so “Buy” was the easy answer. The matrix tells you what these accounts "
+                            "currently think, not that they are right — a flip away from Buy is the informative event.")
         elif worst >= 0:
-            verdict_line = f"<b>Yes, slightly.</b> The roster beats “always Buy” on every horizon (by up to {best:.0%} points)."
+            verdict_line = f"<b>Yes, slightly.</b> As a group they beat “always Buy” on every horizon (by up to {best:.0%} points)."
         else:
-            verdict_line = ("<b>Mixed.</b> The roster beats “always Buy” on " +
-                            ", ".join(h.lower() for h, v in edges.items() if v > 0) + " and loses on " +
+            verdict_line = ("<b>Mixed.</b> As a group they beat “always Buy” on " +
+                            ", ".join(h.lower() for h, v in edges.items() if v > 0) + " and lose on " +
                             ", ".join(h.lower() for h, v in edges.items() if v <= 0) + ".")
         B.append(f"<div style='font-size:13px;color:#211c16;margin-bottom:8px;line-height:1.5'>{verdict_line}</div>")
     B.append("<table role=presentation width=100% cellpadding=0 cellspacing=0 style='font-size:12.5px;background:#fff;border:1px solid #e8ded0;border-radius:10px;padding:6px 12px'>"
-             "<tr style='color:#8a8073;font-size:11px'><td>horizon</td><td align=right title='share of matured calls that were right'>roster right</td>"
-             "<td align=right>“always Buy” right</td><td align=right>difference</td><td align=right>calls scored</td></tr>")
+             "<tr style='color:#8a8073;font-size:11px'><td>horizon</td><td align=right>all accounts, averaged</td>"
+             "<td align=right>“always Buy” rule</td><td align=right>difference</td><td align=right>calls scored</td></tr>")
     for h in HORIZONS:
         r = hr.get(h)
         if not r:
@@ -422,9 +423,9 @@ def render(d: dict, ext: dict | None, credits: float | None, P: list[tuple[str, 
                  f"<td align=right style='color:{col};font-weight:600'>{edge:+.0%}</td><td align=right style='color:#8a8073'>{r['n']:,}</td></tr>")
     B.append("</table>")
     B.append("<div style='color:#8a8073;font-size:11px;margin-top:4px;line-height:1.45'>"
-             "<b>roster right</b> = every matured call scored CORRECT 1 · PARTIAL ½ · WRONG 0, averaged. "
-             "<b>“always Buy” right</b> = the same calls if each had simply said Buy (market up 1 · flat ½ · down 0). "
-             "Most of the period was a bull market, so a high first column is not skill; only the difference is.</div>")
+             "<b>all accounts, averaged</b> = every matured call from every account, scored right 1 · half-right ½ · wrong 0, then averaged. "
+             "<b>“always Buy” rule</b> = the same calls, pretending each had said Buy (market went up 1 · flat ½ · down 0). "
+             "Only the difference measures skill.</div>")
 
     def _trust_list(items):
         return "".join(f"<tr><td style='padding:2px 0'>@{_esc(t['handle'])}</td><td align=right style='font-weight:600'>{t['score']:.2f}</td>"

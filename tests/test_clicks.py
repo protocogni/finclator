@@ -40,7 +40,7 @@ def test_report_audience_and_skill_sections(conn, monkeypatch):
     d = report.gather(conn, now, model="m")
     assert d["clicks"]["d7"]["total"] == 1 and d["clickers"][0]["who"] == "me@example.com"
     subject, html = report.render(d, None, None, [], {}, now)
-    assert "Does the roster beat" in html and "roster right" in html
+    assert "as a group, better than" in html and "all accounts, averaged" in html
     assert "Most clicked influencers" in html and "@alice" in html and "me@example.com" in html
     assert "Least reliable" not in html          # fixture's only scored account has n=1 < 10 → lists stay empty
     conn.execute("UPDATE trust SET n=12 WHERE handle='alice' AND asset='*'")
