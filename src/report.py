@@ -158,6 +158,16 @@ def gather(conn, now: datetime | None = None, model: str | None = None, window_h
     top_trust = [dict(handle=r["handle"], n=r["n"], score=round(float(r["score"]), 2)) for r in conn.execute(
         "SELECT handle, n, score FROM trust WHERE model=? AND asset='*' AND horizon='*' AND n >= 10 ORDER BY score DESC LIMIT 5",
         (model,)).fetchall()]
+    bottom_trust = [dict(handle=r["handle"], n=r["n"], score=round(float(r["score"]), 2)) for r in conn.execute(
+        "SELECT handle, n, score FROM trust WHERE model=? AND asset='*' AND horizon='*' AND n >= 10 ORDER BY score ASC LIMIT 5",
+        (model,)).fetchall()]
+
+    # who looks at whom: influencer-link clicks (panel, attributed by email) + public site (anonymous), last 7 / 30 d
+    from .admin import click_stats
+    clicks = {"d7": click_stats(conn, days=7, limit=8), "d30": click_stats(conn, days=30, limit=8)}
+    clickers = [dict(who=r["who"], n=r["n"], handles=r["h"]) for r in conn.execute(
+        "SELECT who, count(*) n, count(DISTINCT handle) h FROM clicks WHERE at >= ? AND who IS NOT NULL GROUP BY who ORDER BY n DESC LIMIT 8",
+        ((now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S"),)).fetchall()]
 
     return {
         "now": now.isoformat(timespec="seconds"), "model": model, "window_h": window_h,
@@ -175,6 +185,9 @@ def gather(conn, now: datetime | None = None, model: str | None = None, window_h
         "hit_rates": score.hit_rates(conn, model),
         "stale_accounts": stale,
         "top_trust": top_trust,
+        "bottom_trust": bottom_trust,
+        "clicks": clicks,
+        "clickers": clickers,
     }
 
 
@@ -311,7 +324,7 @@ def render(d: dict, ext: dict | None, credits: float | None, P: list[tuple[str, 
     date_line = now.astimezone(timezone(timedelta(hours=-4))).strftime("%A, %B %-d, %Y")
     subject = f"{icon} finclator daily · {word} · {act['tweets']['now']} tweets · {act['calls']['now']} calls"
 
-    B = [f"<!doctype html><html><body style='margin:0;padding:0;background:#fbf7f0'>"
+    B = [f"<!doctype html><html><head><meta charset=utf-8></head><body style='margin:0;padding:0;background:#fbf7f0'>"
          f"<div style='display:none;max-height:0;overflow:hidden'>{_esc(word)} · matrix {fmt_age(mx['age_h'])} old · {fn['pending']} pending</div>"
          f"<table role=presentation width=100% cellpadding=0 cellspacing=0 style='background:#fbf7f0;padding:22px 10px'><tr><td align=center>"
          f"<table role=presentation width=100% cellpadding=0 cellspacing=0 style='max-width:640px;font-family:-apple-system,Segoe UI,Roboto,sans-serif'><tr><td>"
@@ -379,38 +392,89 @@ def render(d: dict, ext: dict | None, credits: float | None, P: list[tuple[str, 
     B.append(f"<div style='color:#8a8073;font-size:11px'>net = trust-weighted buy − sell share · accts = distinct voters (one vote per account per cell) · generated {_esc((mx['generated_at'] or '—')[:16])} UTC</div>")
 
     # trust / skill
-    B.append(_h2("🎯 Skill vs always-BUY"))
+    B.append(_h2("🎯 Does the roster beat “just buy”?"))
     hr = d["hit_rates"]
+    edges = {h: hr[h]["rate"] - hr[h]["baseline"] for h in HORIZONS if h in hr}
+    if edges:
+        worst = min(edges.values())
+        best = max(edges.values())
+        if best <= 0:
+            verdict_line = (f"<b>No.</b> On every horizon the roster's own calls scored below a dumb “always Buy” on the same calls "
+                            f"(by {abs(worst):.0%} to {abs(best):.0%} points). The matrix is a read on what these accounts think, "
+                            "not evidence that they are right — a flip away from Buy is the informative event.")
+        elif worst >= 0:
+            verdict_line = f"<b>Yes, slightly.</b> The roster beats “always Buy” on every horizon (by up to {best:.0%} points)."
+        else:
+            verdict_line = ("<b>Mixed.</b> The roster beats “always Buy” on " +
+                            ", ".join(h.lower() for h, v in edges.items() if v > 0) + " and loses on " +
+                            ", ".join(h.lower() for h, v in edges.items() if v <= 0) + ".")
+        B.append(f"<div style='font-size:13px;color:#211c16;margin-bottom:8px;line-height:1.5'>{verdict_line}</div>")
     B.append("<table role=presentation width=100% cellpadding=0 cellspacing=0 style='font-size:12.5px;background:#fff;border:1px solid #e8ded0;border-radius:10px;padding:6px 12px'>"
-             "<tr style='color:#8a8073;font-size:11px'><td>horizon</td><td align=right>roster</td><td align=right>always-BUY</td><td align=right>edge</td><td align=right>n</td></tr>")
+             "<tr style='color:#8a8073;font-size:11px'><td>horizon</td><td align=right title='share of matured calls that were right'>roster right</td>"
+             "<td align=right>“always Buy” right</td><td align=right>difference</td><td align=right>calls scored</td></tr>")
     for h in HORIZONS:
         r = hr.get(h)
         if not r:
             continue
         edge = r["rate"] - r["baseline"]
         col = "#176c33" if edge > 0 else "#b3261e"
-        B.append(f"<tr><td style='padding:3px 0'>{h}</td><td align=right>{r['rate']:.1%}</td><td align=right>{r['baseline']:.1%}</td>"
-                 f"<td align=right style='color:{col};font-weight:600'>{edge:+.1%}</td><td align=right style='color:#8a8073'>{r['n']:,}</td></tr>")
+        B.append(f"<tr><td style='padding:3px 0'>{h.capitalize()}</td><td align=right>{r['rate']:.0%}</td><td align=right>{r['baseline']:.0%}</td>"
+                 f"<td align=right style='color:{col};font-weight:600'>{edge:+.0%}</td><td align=right style='color:#8a8073'>{r['n']:,}</td></tr>")
     B.append("</table>")
-    if d["top_trust"]:
-        B.append("<div style='font-size:12px;margin-top:6px;color:#5d554b'>Top trust (n ≥ 10): " +
-                 ", ".join(f"@{_esc(t['handle'])} {t['score']:.2f} ({t['n']})" for t in d["top_trust"]) + "</div>")
-    B.append(f"<div style='color:#8a8073;font-size:11px'>{fn['scored']} accounts scored · {fn['calls']:,} calls · {fn['outcomes']:,} matured · {fn['tweets']:,} tweets from {fn['active']}/{fn['accounts']} active accounts</div>")
+    B.append("<div style='color:#8a8073;font-size:11px;margin-top:4px;line-height:1.45'>"
+             "<b>roster right</b> = every matured call scored CORRECT 1 · PARTIAL ½ · WRONG 0, averaged. "
+             "<b>“always Buy” right</b> = the same calls if each had simply said Buy (market up 1 · flat ½ · down 0). "
+             "Most of the period was a bull market, so a high first column is not skill; only the difference is.</div>")
 
-    # audience
-    B.append(_h2("👥 Audience (finclator.com)"))
+    def _trust_list(items):
+        return "".join(f"<tr><td style='padding:2px 0'>@{_esc(t['handle'])}</td><td align=right style='font-weight:600'>{t['score']:.2f}</td>"
+                       f"<td align=right style='color:#8a8073'>{t['n']} calls</td></tr>" for t in items)
+    if d["top_trust"]:
+        B.append("<table role=presentation width=100% cellpadding=0 cellspacing=0 style='font-size:12.5px;margin-top:8px'><tr valign=top>"
+                 "<td width=50% style='padding-right:6px'><div style='color:#8a8073;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:3px'>Most reliable</div>"
+                 "<table role=presentation width=100% cellpadding=0 cellspacing=0 style='background:#fff;border:1px solid #e8ded0;border-radius:10px;padding:4px 10px'>" + _trust_list(d["top_trust"]) + "</table></td>"
+                 "<td width=50% style='padding-left:6px'><div style='color:#8a8073;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin-bottom:3px'>Least reliable</div>"
+                 "<table role=presentation width=100% cellpadding=0 cellspacing=0 style='background:#fff;border:1px solid #e8ded0;border-radius:10px;padding:4px 10px'>" + _trust_list(d.get("bottom_trust", [])) + "</table></td></tr></table>")
+        B.append("<div style='color:#8a8073;font-size:11px;margin-top:4px'>trust = (points + 5) / (calls + 10), all cells pooled; 0.50 = no better than a coin, accounts with ≥ 10 matured calls only</div>")
+    B.append(f"<div style='color:#8a8073;font-size:11px;margin-top:4px'>{fn['scored']} accounts scored · {fn['calls']:,} calls · {fn['outcomes']:,} matured · {fn['tweets']:,} tweets from {fn['active']}/{fn['accounts']} active accounts</div>")
+
+    # audience: visitors (Vercel Web Analytics) → who (signed-in panel users) → what they look at (influencer clicks)
+    B.append(_h2("👥 Audience"))
     if ext:
         d1, d7 = ext.get("d1", {}), ext.get("d7", {})
         B.append(_grid([
-            _card("visitors 24 h", f"{d1.get('visitors') if d1.get('visitors') is not None else '—'}", f"{d1.get('pageviews') or 0} pageviews"),
+            _card("visitors 24 h", f"{d1.get('visitors') if d1.get('visitors') is not None else '—'}", f"{d1.get('pageviews') or 0} pageviews · finclator.com, anonymous"),
             _card("visitors 7 d", f"{d7.get('visitors') if d7.get('visitors') is not None else '—'}", f"{d7.get('pageviews') or 0} pageviews"),
         ]))
         if ext.get("countries"):
             B.append("<div style='font-size:12px;margin-top:6px;color:#5d554b'>7 d by country: " + ", ".join(f"{c} {n}" for c, n in ext["countries"]) + "</div>")
         if ext.get("paths"):
-            B.append("<div style='font-size:12px;color:#5d554b'>7 d top paths: " + ", ".join(f"{_esc(p)} {n}" for p, n in ext["paths"]) + "</div>")
+            B.append("<div style='font-size:12px;color:#5d554b'>7 d most visited pages: " + ", ".join(f"{_esc(p)} {n}" for p, n in ext["paths"]) + "</div>")
+        B.append("<div style='color:#8a8073;font-size:11px;margin-top:2px'>Vercel Web Analytics counts anonymous visitors to the public site and the panel — it cannot say who they are.</div>")
     else:
         B.append("<div style='color:#8a8073;font-size:12.5px'>Web Analytics unavailable (VERCEL_API_TOKEN / VERCEL_PROJECT_ID / VERCEL_TEAM_ID unset or request failed).</div>")
+
+    ck7, ck30 = d.get("clicks", {}).get("d7", {}), d.get("clicks", {}).get("d30", {})
+    B.append("<div style='color:#8a8073;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin:12px 0 3px'>Who is in the panel · 7 d</div>")
+    if d.get("clickers"):
+        B.append("<table role=presentation width=100% cellpadding=0 cellspacing=0 style='font-size:12.5px;background:#fff;border:1px solid #e8ded0;border-radius:10px;padding:4px 10px'>"
+                 + "".join(f"<tr><td style='padding:2px 0'>{_esc(c['who'])}</td><td align=right style='color:#8a8073'>{c['n']} clicks · {c['handles']} accounts</td></tr>" for c in d["clickers"])
+                 + "</table>")
+    else:
+        B.append("<div style='font-size:12px;color:#5d554b'>No signed-in panel user clicked an influencer link in the last 7 days.</div>")
+
+    B.append("<div style='color:#8a8073;font-size:11px;text-transform:uppercase;letter-spacing:.06em;font-weight:700;margin:12px 0 3px'>"
+             f"Most clicked influencers · 7 d ({ck7.get('total', 0)} clicks) · 30 d ({ck30.get('total', 0)})</div>")
+    if ck30.get("top"):
+        seven = {t["handle"]: t["n"] for t in ck7.get("top", [])}
+        B.append("<table role=presentation width=100% cellpadding=0 cellspacing=0 style='font-size:12.5px;background:#fff;border:1px solid #e8ded0;border-radius:10px;padding:4px 10px'>"
+                 "<tr style='color:#8a8073;font-size:11px'><td>account</td><td align=right>7 d</td><td align=right>30 d</td><td align=right>users</td></tr>"
+                 + "".join(f"<tr><td style='padding:2px 0'><a href='https://x.com/{_esc(t['handle'])}' style='color:#211c16'>@{_esc(t['handle'])}</a></td>"
+                           f"<td align=right>{seven.get(t['handle'], 0)}</td><td align=right style='font-weight:600'>{t['n']}</td><td align=right style='color:#8a8073'>{t['who']}</td></tr>"
+                           for t in ck30["top"]) + "</table>")
+        B.append("<div style='color:#8a8073;font-size:11px;margin-top:4px'>clicks on any @account / tweet link, panel + public site · users = distinct signed-in panel users (site visitors are anonymous)</div>")
+    else:
+        B.append("<div style='font-size:12px;color:#5d554b'>No influencer clicks recorded yet — every @account / tweet link on the panel and the site reports here.</div>")
 
     # cost
     B.append(_h2("💸 Cost"))

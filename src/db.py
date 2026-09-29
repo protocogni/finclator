@@ -127,10 +127,22 @@ CREATE TABLE IF NOT EXISTS trust (
     computed_at TEXT NOT NULL,
     PRIMARY KEY (model, handle, asset, horizon)
 );
+
+-- Influencer link clicks on the panel and the public site (which accounts people look at). Written by
+-- admin.record_click via /api/click; `who` = signed-in panel email or NULL for an anonymous visitor.
+CREATE TABLE IF NOT EXISTS clicks (
+    id          INTEGER PRIMARY KEY,
+    at          TEXT NOT NULL,                -- YYYY-MM-DD HH:MM:SS UTC
+    handle      TEXT NOT NULL,
+    src         TEXT,                         -- tab / page that carried the link: accounts, matrix, audit, site…
+    page        TEXT,                         -- path the click happened on
+    who         TEXT                          -- panel email or NULL
+);
+CREATE INDEX IF NOT EXISTS ix_clicks_at ON clicks(at);
 """
 
 # Tables in FK order (migration + schema listing) and their conflict keys (for INSERT OR REPLACE → ON CONFLICT).
-TABLES = ["accounts", "tweets", "classified_by", "gate", "calls", "prices", "outcomes", "trust"]
+TABLES = ["accounts", "tweets", "classified_by", "gate", "calls", "prices", "outcomes", "trust", "clicks"]
 CONFLICT_KEYS = {
     "accounts": ("handle",), "tweets": ("id",), "classified_by": ("tweet_id", "model"), "gate": ("tweet_id", "model"),
     "calls": ("tweet_id", "asset", "model"), "prices": ("asset", "date"), "outcomes": ("call_id",),

@@ -127,6 +127,12 @@
   $("ex-result").innerHTML = `<span class="tag ${ex.result}">${ex.result}</span>`;
   $("example").hidden = false;
 })();
+// which influencers visitors look at: any x.com link → /panel/api/click (anonymous; handle must be on the roster)
+document.addEventListener("click", e => {
+  const a = e.target.closest('a[href^="https://x.com/"]'); if (!a) return;
+  const h = a.getAttribute("href").split("/")[3]; if (!h) return;
+  try { navigator.sendBeacon("/panel/api/click", new Blob([JSON.stringify({handle: h, src: "site", page: location.pathname})], {type: "application/json"})); } catch {}
+});
 </script>
 </body>
 </html>

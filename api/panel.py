@@ -128,6 +128,8 @@ def _render(path: str, qs: str, email: str) -> tuple[int, str, str]:
         if path == "api/matrix":
             p = ROOT / "data" / "matrix.json"
             return 200, "application/json", p.read_text() if p.exists() else "{}"
+        if path == "api/clicks":
+            return 200, "application/json", json.dumps(admin.click_stats(conn, days=int(parse_qs(qs).get("days", ["30"])[0] or 30)), indent=1)
         return 404, "text/plain; charset=utf-8", "not found"
     finally:
         admin.CHROME.reset(token)
@@ -169,6 +171,32 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel's Python runtime
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(b)
+
+    def do_POST(self):
+        """/panel/api/click — influencer-link click beacon. Signed-in users are attributed; the public site posts the
+        same body with no cookie and is stored anonymously (handle must be on the roster, so it cannot be spammed
+        with junk; a tiny table either way)."""
+        global _current_cookie
+        u = urlparse(self.path)
+        sub = (parse_qs(u.query).get("p") or [""])[0].strip("/")
+        if sub != "api/click":
+            return self._send(404, "text/plain; charset=utf-8", "not found")
+        _current_cookie = self.headers.get("Cookie", "")
+        email = _session_email(_current_cookie)
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) or b"{}")
+        except (ValueError, TypeError):
+            body = {}
+        import sys
+        sys.path.insert(0, str(ROOT))
+        from src import admin  # noqa: PLC0415
+        conn = _connect()
+        try:
+            ok = admin.record_click(conn, body.get("handle", ""), body.get("src"), body.get("page"), email)
+        finally:
+            conn.close()
+        self._send(200 if ok else 400, "application/json", json.dumps({"ok": ok}))
 
     def do_GET(self):
         global _current_cookie

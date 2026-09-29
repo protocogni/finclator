@@ -12,7 +12,7 @@ import json
 import re
 import subprocess
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -86,6 +86,11 @@ async function tailLog(){const el=document.getElementById('log');if(!el)return;
  try{const t=await (await fetch(LOG_URL)).text();if(t!==el.textContent){el.textContent=t;
  if(document.getElementById('follow').checked)el.scrollTop=el.scrollHeight;}}catch(e){}}
 window.addEventListener('load',()=>{const el=document.getElementById('log');if(el){el.scrollTop=el.scrollHeight;setInterval(tailLog,3000);}});
+// influencer-link clicks → /api/click (which accounts people actually look at; see Progress → "most clicked")
+document.addEventListener('click',e=>{const a=e.target.closest('a[href^="https://x.com/"]');if(!a)return;
+ const h=a.getAttribute('href').split('/')[3];if(!h||h==='status')return;
+ const body=JSON.stringify({handle:h,src:document.body.dataset.tab||'',page:location.pathname});
+ try{navigator.sendBeacon(CLICK_URL,new Blob([body],{type:'application/json'}))}catch(x){}});
 """
 
 
@@ -172,9 +177,33 @@ def _page(title: str, body: str, active: str) -> str:
     who = ch.get("who", "")
     return (f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width, initial-scale=1'>"
             f"<title>Finclator admin — {title}</title>"
-            f"{refresh}<style>{CSS}</style><script>const LOG_URL={json.dumps(_u('/api/log'))}</script><script>{JS}</script>"
+            f"{refresh}<style>{CSS}</style><script>const LOG_URL={json.dumps(_u('/api/log'))},CLICK_URL={json.dumps(_u('/api/click'))}</script><script>{JS}</script>"
+            f"<body data-tab='{html.escape(active.strip('/') or 'progress')}'>"
             f"<nav>{nav}<span style='margin-left:auto;color:#9aa'>{datetime.now(timezone.utc):%H:%M:%S} UTC · {mode}</span>{who}</nav>"
-            f"<main>{_wrap_tables(body)}</main>")
+            f"<main>{_wrap_tables(body)}</main></body>")
+
+
+def record_click(conn, handle: str, src: str | None, page: str | None, who: str | None) -> bool:
+    """Store one influencer-link click. Handle must be on the roster (drops junk); src/page are clipped."""
+    handle = (handle or "").strip().lstrip("@").lower()[:40]
+    if not handle or not _one(conn, "SELECT 1 FROM accounts WHERE handle=?", handle):
+        return False
+    conn.execute("INSERT INTO clicks(at, handle, src, page, who) VALUES(datetime('now'), ?, ?, ?, ?)",
+                 (handle, (src or "")[:40] or None, (page or "")[:120] or None, (who or "")[:120] or None))
+    conn.commit()
+    return True
+
+
+def click_stats(conn, days: int = 30, limit: int = 15) -> dict:
+    """{'days', 'total', 'clickers', 'top': [{handle, n, who}], 'by_src': {src: n}} over the last `days` days."""
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    t = _one(conn, "SELECT count(*) n, count(DISTINCT who) w FROM clicks WHERE at >= ?", since)
+    top = [{"handle": r["handle"], "n": r["n"], "who": r["w"]} for r in _q(
+        conn, "SELECT handle, count(*) n, count(DISTINCT who) w FROM clicks WHERE at >= ? GROUP BY handle "
+              "ORDER BY n DESC, handle LIMIT ?", since, limit)]
+    by_src = {r["src"] or "?": r["n"] for r in _q(
+        conn, "SELECT src, count(*) n FROM clicks WHERE at >= ? GROUP BY src ORDER BY n DESC", since)}
+    return {"days": days, "total": t["n"], "clickers": t["w"], "top": top, "by_src": by_src}
 
 
 def status(conn) -> dict:
@@ -309,6 +338,21 @@ def page_progress(conn) -> str:
                  f"<td>{(r['f'] or '')[:10]}</td><td{stale} title='days since newest stored tweet: {last_age}'>{(r['l'] or '')[:10]}</td>"
                  f"<td>{(r['last_fetch_at'] or '')[:16].replace('T', ' ')}</td></tr>")
     B.append("</tbody></table><p class=help>amber <i>last</i> = active account with no stored tweet in 30 d — check the fetch.</p>")
+
+    # who gets looked at: influencer-link clicks on the panel + public site (JS beacon → /api/click → `clicks`)
+    ck = click_stats(conn)
+    B.append(f"<h2>Most clicked influencers <small>· last {ck['days']} d · {ck['total']} clicks"
+             + (f" · {ck['clickers']} signed-in users" if ck["clickers"] else "") + "</small></h2>")
+    if ck["top"]:
+        B.append("<table class=sortable><thead><tr><th>account</th><th title='clicks on any x.com link for this account (profile or tweet), panel + public site'>clicks</th>"
+                 "<th title='distinct signed-in panel users who clicked; anonymous site visitors are not counted here'>users</th></tr></thead><tbody>")
+        for t in ck["top"]:
+            B.append(f"<tr><td><a href='{_u('/accounts')}#acc-{e(t['handle'])}' style='color:#9ecbff'>@{e(t['handle'])}</a></td>"
+                     f"<td class=num>{t['n']}</td><td class=num>{t['who']}</td></tr>")
+        B.append("</tbody></table><p class=help>by source: " + " · ".join(f"{e(k)} {v}" for k, v in ck["by_src"].items()) +
+                 ". Every @account / tweet link on every tab and on the public site reports here.</p>")
+    else:
+        B.append("<p class=help>No clicks recorded yet — every @account / tweet link on the panel and the public site reports here.</p>")
 
     if not _readonly():
         B.append("<h2>pipeline.log <small>(live, last 200 lines, UTC) · <label><input type=checkbox id=follow checked> follow</label></small></h2>"
@@ -765,6 +809,22 @@ class Handler(BaseHTTPRequestHandler):
             self._send(_page("error", f"<h2>{html.escape(path)} failed</h2><pre>{html.escape(tb)}</pre>", path), code=500)
         finally:
             conn.close()
+
+    def do_POST(self):
+        path, _, _ = self.path.partition("?")
+        if path != "/api/click":
+            return self._send("not found", code=404)
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) or b"{}")
+        except (ValueError, TypeError):
+            body = {}
+        conn = connect()
+        try:
+            ok = record_click(conn, body.get("handle", ""), body.get("src"), body.get("page"), None)
+        finally:
+            conn.close()
+        self._send(json.dumps({"ok": ok}), "application/json", 200 if ok else 400)
 
     def _route(self, path, qs, conn):
         if True:
