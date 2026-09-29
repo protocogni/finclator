@@ -1,0 +1,105 @@
+{"id": "1742347821724877161", "is_call": false, "calls": []}
+{"id": "1743431817535836459", "is_call": false, "calls": []}
+{"id": "1744427365155967065", "is_call": false, "calls": []}
+{"id": "1749830337696292967", "is_call": false, "calls": []}
+{"id": "1751726887590936598", "is_call": false, "calls": []}
+{"id": "1755296269109727286", "is_call": true, "calls": [{"asset": "GOLD", "direction": "BUY", "horizon": "MEDIUM", "confidence": 0.55, "price_target": null, "quote": "a low could occur in May, blast off into new highs in Nov"}]}
+{"id": "1758459803506991189", "is_call": false, "calls": []}
+{"id": "1758850919528079668", "is_call": false, "calls": []}
+{"id": "1762422426195964135", "is_call": false, "calls": []}
+{"id": "1762654072836964749", "is_call": false, "calls": []}
+{"id": "1763776837786935310", "is_call": false, "calls": []}
+{"id": "1764588830966063449", "is_call": false, "calls": []}
+{"id": "1765031292133929194", "is_call": false, "calls": []}
+{"id": "1765391210019950642", "is_call": false, "calls": []}
+{"id": "1765793090357297660", "is_call": true, "calls": [{"asset": "BTC", "direction": "SELL", "horizon": "LONG", "confidence": 0.8, "price_target": null, "quote": "make the switch from fool's gold into the real thing"}, {"asset": "GOLD", "direction": "BUY", "horizon": "LONG", "confidence": 0.8, "price_target": null, "quote": "make the switch from fool's gold into the real thing"}]}
+{"id": "1768575923949801623", "is_call": false, "calls": []}
+{"id": "1768955377549217925", "is_call": true, "calls": [{"asset": "SPX", "direction": "SELL", "horizon": "SHORT", "confidence": 0.5, "price_target": null, "quote": "Tech Positioning extremely crowded – vulnerable to a sharp unwind"}]}
+{"id": "1772669854245425595", "is_call": false, "calls": []}
+{"id": "1774919832539922697", "is_call": false, "calls": []}
+{"id": "1779834585079296356", "is_call": false, "calls": []}
+{"id": "1780578666440794221", "is_call": false, "calls": []}
+{"id": "1786417100032201127", "is_call": false, "calls": []}
+{"id": "1797256414760477121", "is_call": false, "calls": []}
+{"id": "1797661576562176090", "is_call": false, "calls": []}
+{"id": "1798390238785794430", "is_call": false, "calls": []}
+{"id": "1808560614744129949", "is_call": false, "calls": []}
+{"id": "1810676186231767450", "is_call": false, "calls": []}
+{"id": "1813231120177099260", "is_call": false, "calls": []}
+{"id": "1815669494548680850", "is_call": true, "calls": [{"asset": "BTC", "direction": "BUY", "horizon": "LONG", "confidence": 0.6, "price_target": null, "quote": "Bull Market Progress"}]}
+{"id": "1819767807522816247", "is_call": false, "calls": []}
+{"id": "1820472156134035538", "is_call": false, "calls": []}
+{"id": "1821482768829726920", "is_call": false, "calls": []}
+{"id": "1822987197806460941", "is_call": false, "calls": []}
+{"id": "1830860911436824941", "is_call": false, "calls": []}
+{"id": "1832251743570407771", "is_call": false, "calls": []}
+{"id": "1835972005595906070", "is_call": true, "calls": [{"asset": "BTC", "direction": "BUY", "horizon": "MEDIUM", "confidence": 0.6, "price_target": null, "quote": "The best lies ahead."}]}
+{"id": "1839326131314622813", "is_call": false, "calls": []}
+{"id": "1844007436983947578", "is_call": false, "calls": []}
+{"id": "1847305441828593789", "is_call": false, "calls": []}
+{"id": "1847743312528027916", "is_call": false, "calls": []}
+{"id": "1849370086043168908", "is_call": false, "calls": []}
+{"id": "1851682507466350678", "is_call": false, "calls": []}
+{"id": "1852354366499332292", "is_call": false, "calls": []}
+{"id": "1853931206691164567", "is_call": false, "calls": []}
+{"id": "1855453163895075162", "is_call": false, "calls": []}
+{"id": "1856706996390469660", "is_call": true, "calls": [{"asset": "BTC", "direction": "BUY", "horizon": "MEDIUM", "confidence": 0.6, "price_target": null, "quote": "That would mean Bitcoin could peak in this cycle in mid-September or mid-October 2025"}]}
+{"id": "1859694267041808860", "is_call": false, "calls": []}
+{"id": "1860458710616678873", "is_call": false, "calls": []}
+{"id": "1861780329947873479", "is_call": false, "calls": []}
+{"id": "1866157505384235099", "is_call": false, "calls": []}
+{"id": "1867343685966241851", "is_call": false, "calls": []}
+{"id": "1870085465094697197", "is_call": false, "calls": []}
+{"id": "1871027831796596837", "is_call": false, "calls": []}
+{"id": "1875653835521454509", "is_call": false, "calls": []}
+{"id": "1876774942119002118", "is_call": false, "calls": []}
+{"id": "1881123372278649187", "is_call": false, "calls": []}
+{"id": "1881316878653739437", "is_call": false, "calls": []}
+{"id": "1884723206507966843", "is_call": false, "calls": []}
+{"id": "1886229363353382959", "is_call": false, "calls": []}
+{"id": "1886435689061105689", "is_call": false, "calls": []}
+{"id": "1895371523084689736", "is_call": false, "calls": []}
+{"id": "1899550651085971478", "is_call": false, "calls": []}
+{"id": "1909087922847891956", "is_call": false, "calls": []}
+{"id": "1910415186437034019", "is_call": false, "calls": []}
+{"id": "1910471879141593301", "is_call": false, "calls": []}
+{"id": "1914680632401187061", "is_call": false, "calls": []}
+{"id": "1915631893254480353", "is_call": false, "calls": []}
+{"id": "1917942764337012832", "is_call": false, "calls": []}
+{"id": "1918485663277605325", "is_call": false, "calls": []}
+{"id": "1920138875822842102", "is_call": false, "calls": []}
+{"id": "1943520958809010559", "is_call": false, "calls": []}
+{"id": "1943635380835942717", "is_call": false, "calls": []}
+{"id": "1948788146713297184", "is_call": false, "calls": []}
+{"id": "1951077942466945255", "is_call": false, "calls": []}
+{"id": "1955673454511837436", "is_call": false, "calls": []}
+{"id": "1955894696728723783", "is_call": false, "calls": []}
+{"id": "1967385407798088102", "is_call": false, "calls": []}
+{"id": "1974147450110947636", "is_call": false, "calls": []}
+{"id": "1979187947799777709", "is_call": false, "calls": []}
+{"id": "1982145206318453133", "is_call": false, "calls": []}
+{"id": "1988223342332309841", "is_call": false, "calls": []}
+{"id": "1993060013955596520", "is_call": true, "calls": [{"asset": "BTC", "direction": "BUY", "horizon": "SHORT", "confidence": 0.6, "price_target": 93000.0, "quote": "Bitcoin is getting closer and closer to $93000"}]}
+{"id": "1995426901540921507", "is_call": false, "calls": []}
+{"id": "1998023926363181471", "is_call": false, "calls": []}
+{"id": "1999193366622323129", "is_call": false, "calls": []}
+{"id": "2003455629965353262", "is_call": false, "calls": []}
+{"id": "2015096558535000338", "is_call": false, "calls": []}
+{"id": "2018426552338243694", "is_call": true, "calls": [{"asset": "BTC", "direction": "BUY", "horizon": "LONG", "confidence": 0.6, "price_target": null, "quote": "As long as it reverts to its long-term trend, it should average +3.7% per month over the next 6 years."}]}
+{"id": "2021687231602425930", "is_call": false, "calls": []}
+{"id": "2023034583000699225", "is_call": false, "calls": []}
+{"id": "2032636814066864580", "is_call": false, "calls": []}
+{"id": "2036051094309068931", "is_call": false, "calls": []}
+{"id": "2040061002918834617", "is_call": false, "calls": []}
+{"id": "2044251549321363774", "is_call": true, "calls": [{"asset": "GOLD", "direction": "BUY", "horizon": "LONG", "confidence": 0.55, "price_target": null, "quote": "I would argue we are still in the awareness phase."}]}
+{"id": "2048069508355539395", "is_call": false, "calls": []}
+{"id": "2057857439764996577", "is_call": false, "calls": []}
+{"id": "2061415810850005490", "is_call": true, "calls": [{"asset": "BTC", "direction": "BUY", "horizon": "SHORT", "confidence": 0.55, "price_target": null, "quote": "But for as long as price continues to retest the $73k level throughout this week, Bitcoin could trend continue from here"}]}
+{"id": "2066815858064740824", "is_call": false, "calls": []}
+{"id": "2069396036804620417", "is_call": false, "calls": []}
+{"id": "2071285020921139535", "is_call": false, "calls": []}
+{"id": "2074249216994484567", "is_call": false, "calls": []}
+{"id": "2082798381861097701", "is_call": true, "calls": [{"asset": "SPX", "direction": "SELL", "horizon": "SHORT", "confidence": 0.6, "price_target": null, "quote": "We continue to hold our $SPY short position as a portfolio hedge"}]}
+{"id": "2091974379588518396", "is_call": true, "calls": [{"asset": "BTC", "direction": "BUY", "horizon": "SHORT", "confidence": 0.6, "price_target": null, "quote": "probably higher in the next 30 days"}]}
+{"id": "2095143440988197058", "is_call": true, "calls": [{"asset": "GOLD", "direction": "BUY", "horizon": "LONG", "confidence": 0.7, "price_target": null, "quote": "That's bullish for gold."}]}
+{"id": "2098030485372858378", "is_call": false, "calls": []}
