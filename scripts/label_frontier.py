@@ -1,10 +1,12 @@
-"""Label a pending JSONL with Claude Opus 5.5 through `hermes chat` (the interactive assistant path used for every
+"""Label a pending JSONL with a Claude model through `hermes chat` (the interactive assistant path used for every
 frontier gold set), carrying the verbatim classifier SYSTEM prompt from src/classify.py.
 
 Usage: PYTHONPATH=. .venv/bin/python scripts/label_frontier.py <pending.jsonl> <out_labels.jsonl> [chunk=40] [workers=4]
+Env: FRONTIER_MODEL (default claude-opus-5-5), FRONTIER_REASONING (default high).
+Resumable: ids already present in <out_labels.jsonl> are skipped and the file is appended to.
 Writes one label line per tweet: {"id", "is_call", "calls":[{asset, direction, horizon, confidence, price_target, quote}]}.
-Chunks whose answer covers < 90 % of their ids are retried once. Progress → stdout; per-chunk raw answers kept in
-$TMPDIR/opus_chunks/ for inspection.
+Chunks whose answer covers < 90 % of their ids are retried once. Per-chunk raw answers are kept in
+$TMPDIR/frontier_chunks/<model>/ for inspection.
 """
 import html
 import json
@@ -18,17 +20,20 @@ from pathlib import Path
 
 from src.classify import SYSTEM
 
-MODEL = os.environ.get("OPUS_MODEL", "claude-opus-5-5")
-REASONING = os.environ.get("OPUS_REASONING", "high")
+MODEL = os.environ.get("FRONTIER_MODEL") or os.environ.get("OPUS_MODEL", "claude-opus-5-5")
+REASONING = os.environ.get("FRONTIER_REASONING") or os.environ.get("OPUS_REASONING", "high")
 src, out = Path(sys.argv[1]), Path(sys.argv[2])
 CHUNK = int(sys.argv[3]) if len(sys.argv) > 3 else 40
 WORKERS = int(sys.argv[4]) if len(sys.argv) > 4 else 4
-WORK = Path(os.environ.get("TMPDIR", "/tmp")) / "opus_chunks"
+WORK = Path(os.environ.get("TMPDIR", "/tmp")) / "frontier_chunks" / MODEL
 WORK.mkdir(parents=True, exist_ok=True)
 
 rows = [json.loads(ln) for ln in open(src) if ln.strip()]
-chunks = [rows[i:i + CHUNK] for i in range(0, len(rows), CHUNK)]
-print(f"{len(rows)} tweets → {len(chunks)} chunks of ≤{CHUNK}, model={MODEL}, reasoning={REASONING}", flush=True)
+done_ids = {json.loads(ln)["id"] for ln in open(out) if ln.strip()} if out.exists() else set()
+todo = [t for t in rows if t["id"] not in done_ids]
+chunks = [todo[i:i + CHUNK] for i in range(0, len(todo), CHUNK)]
+print(f"{len(rows)} tweets, {len(done_ids)} already labeled → {len(todo)} to do in {len(chunks)} chunks of ≤{CHUNK}, "
+      f"model={MODEL}, reasoning={REASONING}", flush=True)
 
 TASK = """
 You are labeling a batch of tweets for a research dataset. Apply the rules above EXACTLY as written to EVERY tweet
@@ -80,17 +85,8 @@ def label(i_chunk):
     return res
 
 
-t0 = time.time()
-labels: list[dict] = []
-with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-    for res in pool.map(label, list(enumerate(chunks))):
-        labels.extend(res)
-
-# validate + normalise
-text = {t["id"]: html.unescape(t["text"]) for t in rows}
-bad_quote = dropped = 0
-clean = []
-for d in labels:
+def clean_one(d: dict, text: str) -> tuple[dict, int, int]:
+    dropped = bad_quote = 0
     calls = []
     for c in d.get("calls") or []:
         if c.get("asset") not in ("BTC", "GOLD", "SPX") or c.get("direction") not in ("BUY", "SELL", "NEUTRAL") \
@@ -98,7 +94,7 @@ for d in labels:
             dropped += 1
             continue
         qte = c.get("quote") or ""
-        if qte and re.sub(r"\s+", " ", qte) not in re.sub(r"\s+", " ", text[d["id"]]):
+        if qte and re.sub(r"\s+", " ", qte) not in re.sub(r"\s+", " ", text):
             bad_quote += 1
         pt = c.get("price_target")
         try:
@@ -107,10 +103,22 @@ for d in labels:
             pt = None
         calls.append({"asset": c["asset"], "direction": c["direction"], "horizon": c["horizon"],
                       "confidence": float(c.get("confidence", 0.5)), "price_target": pt, "quote": qte})
-    clean.append({"id": d["id"], "is_call": bool(d.get("is_call")) and bool(calls), "calls": calls})
-with open(out, "w") as f:
-    for d in clean:
-        f.write(json.dumps(d, ensure_ascii=False) + "\n")
-n_calls = sum(len(d["calls"]) for d in clean)
-print(f"\nwrote {len(clean)}/{len(rows)} labels → {out}  calls={n_calls} is_call={sum(d['is_call'] for d in clean)} "
+    return {"id": d["id"], "is_call": bool(d.get("is_call")) and bool(calls), "calls": calls}, dropped, bad_quote
+
+
+t0 = time.time()
+text = {t["id"]: html.unescape(t["text"]) for t in rows}
+n_new = n_calls = dropped = bad_quote = 0
+with open(out, "a") as f, ThreadPoolExecutor(max_workers=WORKERS) as pool:
+    for res in pool.map(label, list(enumerate(chunks))):
+        for d in res:
+            row, dr, bq = clean_one(d, text[d["id"]])
+            dropped += dr
+            bad_quote += bq
+            n_calls += len(row["calls"])
+            n_new += 1
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        f.flush()
+total = len({json.loads(ln)["id"] for ln in open(out) if ln.strip()})
+print(f"\nappended {n_new} labels → {out} (now {total}/{len(rows)})  new calls={n_calls} "
       f"dropped_malformed={dropped} quote_not_substring={bad_quote}  wall {time.time() - t0:.0f}s", flush=True)

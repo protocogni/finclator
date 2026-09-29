@@ -1,4 +1,4 @@
-# Jev as a call classifier: what I measured
+# Four classifiers, one thousand tweets: what I measured
 
 Notes for the AI Tinkerers talk. Every number here comes from a script in `scripts/` and a file in `data/`,
 nothing is estimated, and I only used English tweets.
@@ -13,193 +13,228 @@ the S&P 500 at the three horizons.
 
 Jev, TypeSafe's decision model, answers typed questions with calibrated probabilities. No text comes back. In
 production I only use it as the "is this a call at all?" gate in front of my local text model (`src/gate.py`). The
-obvious follow-up question, which I had been avoiding because I assumed the answer was no: can Jev produce the two
-things the matrix needs, direction and horizon, on its own? And how does it stack up against the model I actually run
-and against a frontier model, on the same tweets?
+question I had been avoiding, because I assumed the answer was no: can Jev produce the two things the matrix needs,
+direction and horizon, on its own? And how does it compare with the model I actually run, the model I used to run,
+and a frontier model, all reading the same tweets under the same rules?
 
 ## Setup
 
-I wanted three labelers on one set of tweets, all reading the same rules.
+One thousand tweets, five labelers, one set of rules.
 
-The tweets: 400 English originals that mention BTC, gold or the S&P 500, drawn at random from the corpus. 68
-accounts, at most 8 per account, 2023 through 2026, none of them in any earlier gold set.
-`scripts/sample_tweets.py 400 8` writes `data/pending_en.jsonl`.
+The tweets: 1,000 English originals that mention BTC, gold or the S&P 500, drawn at random from the corpus. 76
+accounts, at most 12 per account, spread over 2023 through 2026, none of them in any earlier gold set.
+`scripts/sample_tweets.py` writes them in two batches (`data/pending_en.jsonl`, `data/pending_en2.jsonl`) that
+`data/pending_en1000.jsonl` concatenates.
 
-The reference: Claude Opus 5.5 with reasoning set to high, given the verbatim classifier SYSTEM prompt from
+The reference: Claude Fable 5.1 with reasoning set to high, given the verbatim classifier SYSTEM prompt from
 `src/classify.py`, 40 tweets per request, every quote checked as a substring of its tweet.
-`scripts/label_frontier.py` writes `data/labels_en_opus55.jsonl`. It answered all 400: 75 call tweets, 80 (tweet,
-asset) calls, zero malformed rows, zero bad quotes, 113 seconds.
+`scripts/label_frontier.py` writes `data/labels_en1000_fable51.jsonl`. It answered all 1,000 in 255 seconds: 143 call
+tweets (14 %), 151 (tweet, asset) calls, zero malformed rows, zero bad quotes. Fable is the labeled truth until a
+better labeler shows up; the numbers below are agreement with Fable, not with the market.
 
-Jev: `jev-latest`, which currently answers as `jev-1.13.0`, over the direct API at `api.typesafe.ai/v1/systemone`
-with 32 workers. The SYSTEM prompt is decomposed into typed questions. `is_call` is a noul, so one probability comes
-back. For each asset the tweet mentions there is a stance choice (none / up / down / neutral) and a horizon choice
-(SHORT / MEDIUM / LONG). The question text lives in `scripts/score_jev.py`; `scripts/jev_answers.py` writes
-`data/jev_raw_en.jsonl`. All 400 answered, zero errors, 3.5 seconds of wall time, 6,848 tweets a minute, 0.24 s
-median latency, 575k input tokens, about $0.024.
+The four models, all with the same SYSTEM prompt:
 
-Qwen, the production classifier: Qwen3.6-35B-A3B at q4_K_M on Ollama, on an M5 Pro with 64 GB. Production config
-throughout, meaning 4 tweets per request, terse output, thinking off, 8 workers, same SYSTEM prompt.
-`scripts/qwen_answers.py` writes `data/qwen_preds_en.jsonl`. All 400 in 314 seconds, 77 tweets a minute.
+- Claude Opus 5.5, reasoning high, same script as the reference. `data/labels_en_opus55.jsonl`, 1,000 tweets in
+  about 5 minutes across two runs.
+- Jev, `jev-latest` (answers as `jev-1.13.0`), direct API at `api.typesafe.ai/v1/systemone`, 32 workers. The SYSTEM
+  prompt decomposed into typed questions: `is_call` is a noul (one probability back); for each asset the tweet
+  mentions there is a stance choice (none / up / down / neutral) and a horizon choice (SHORT / MEDIUM / LONG).
+  Question text in `scripts/score_jev.py`, runner `scripts/jev_answers.py`. 1,000 tweets in 8.5 seconds of wall
+  time across two runs, zero errors, 0.24 s median latency, about $0.06 in input tokens.
+- Qwen3.6-35B-A3B q4_K_M, the production classifier, on Ollama on an M5 Pro with 64 GB. Production config: 4 tweets
+  per request, terse output, thinking off, 8 workers. `scripts/qwen_answers.py`. 1,000 tweets in about 12 minutes,
+  77 to 88 tweets a minute.
+- Qwen3-30B-A3B instruct-2507 q4_K_M, the model the 35B replaced, same config. 1,000 tweets in 26 minutes, 38 tweets
+  a minute.
 
-Scoring is `scripts/compare_labelers.py en`. The unit is one (tweet, asset) call, because that is what the matrix
-consumes. Recall is the share of reference calls the model also called. Precision is the share of the model's calls
-that exist in the reference. Direction, horizon and cell are agreement on the calls both sides made (cell means both
-right). "e2e cell" is the share of reference calls that came out fully right, so recall times cell.
+Scoring is `scripts/compare_four.py`. The unit is one (tweet, asset) call, because that is what the matrix consumes.
+Recall is the share of reference calls the model also called. Precision is the share of the model's calls that exist
+in the reference. Direction, horizon and cell are agreement on the calls both sides made (cell means both right).
+"e2e cell" is the share of reference calls that came out fully right, recall times cell.
 
 Jev counts as having made a call when `p_call` clears the threshold and the stance for that asset is not `none`.
 Direction is the stance choice, horizon is the horizon choice.
 
-## Results, reference = Opus 5.5, 400 tweets, 80 reference calls
+## Results, reference = Fable 5.1, 1,000 tweets, 151 reference calls
 
 ### Per call
 
-| Model | recall | precision | F1 | direction | horizon | cell (dir+hor) | e2e cell |
-|---|---|---|---|---|---|---|---|
-| Qwen3.6 batch-4 (production) | 0.74 | 0.69 | 0.71 | 0.97 | 0.85 | 0.81 | 0.60 |
-| Jev p ≥ 0.2 | 0.85 | 0.72 | 0.78 | 0.94 | 0.81 | 0.75 | 0.64 |
-| Jev p ≥ 0.3 (the production gate threshold) | 0.75 | 0.75 | 0.75 | 0.93 | 0.80 | 0.73 | 0.55 |
-| Jev p ≥ 0.4 | 0.66 | 0.79 | 0.72 | 0.94 | 0.79 | 0.74 | 0.49 |
-| Jev p ≥ 0.5 | 0.57 | 0.84 | 0.68 | 0.93 | 0.78 | 0.72 | 0.41 |
-| Jev p ≥ 0.6 | 0.51 | 0.85 | 0.64 | 0.93 | 0.76 | 0.68 | 0.35 |
+| model | calls made | shared | recall | precision | F1 | direction | horizon | cell | e2e cell |
+|---|---|---|---|---|---|---|---|---|---|
+| Opus 5.5 | 167 | 137 | 0.91 | 0.82 | 0.86 | 0.98 | 0.89 | 0.87 | 0.79 |
+| Jev p ≥ 0.2 | 210 | 133 | 0.88 | 0.63 | 0.74 | 0.97 | 0.83 | 0.80 | 0.70 |
+| Jev p ≥ 0.3 (the production gate threshold) | 178 | 123 | 0.81 | 0.69 | 0.75 | 0.97 | 0.83 | 0.80 | 0.65 |
+| Jev p ≥ 0.4 | 141 | 111 | 0.74 | 0.79 | 0.76 | 0.97 | 0.81 | 0.78 | 0.58 |
+| Jev p ≥ 0.5 | 107 | 94 | 0.62 | 0.88 | 0.73 | 0.97 | 0.80 | 0.77 | 0.48 |
+| Qwen3.6-35B (production) | 181 | 120 | 0.79 | 0.66 | 0.72 | 0.96 | 0.81 | 0.78 | 0.62 |
+| Qwen3-30B (previous) | 188 | 108 | 0.72 | 0.57 | 0.64 | 0.90 | 0.70 | 0.63 | 0.45 |
 
-### Per tweet, is_call only (19 % of the tweets are calls in the reference)
+### Per tweet, is_call only (14 % of tweets are calls in the reference)
 
-| Model | accuracy | precision | recall |
+| model | accuracy | precision | recall |
 |---|---|---|---|
-| Qwen3.6 batch-4 | 0.892 | 0.70 | 0.75 |
-| Jev p ≥ 0.2 | 0.912 | 0.72 | 0.87 |
-| Jev p ≥ 0.3 | 0.910 | 0.76 | 0.76 |
-| Jev p ≥ 0.4 | 0.907 | 0.81 | 0.67 |
-| Jev p ≥ 0.5 | 0.900 | 0.84 | 0.57 |
+| Opus 5.5 | 0.957 | 0.81 | 0.91 |
+| Jev p ≥ 0.2 | 0.913 | 0.64 | 0.90 |
+| Jev p ≥ 0.3 | 0.924 | 0.70 | 0.83 |
+| Jev p ≥ 0.4 | 0.936 | 0.79 | 0.75 |
+| Qwen3.6-35B | 0.921 | 0.69 | 0.81 |
+| Qwen3-30B | 0.886 | 0.58 | 0.74 |
 
-### Where the disagreements are (rows = Opus, columns = the model)
+### Where the disagreements are (rows = Fable, columns = the model)
 
-Jev @0.3, direction, 60 shared calls | Jev @0.3, horizon
---- | ---
-BUY → 41 BUY, 2 NEUTRAL, 0 SELL | SHORT → 25 SHORT, 0, 0
-NEUTRAL → 1 BUY, 4 NEUTRAL, 1 SELL | MEDIUM → 6 SHORT, 11 MEDIUM, 4 LONG
-SELL → 0, 0, 11 SELL | LONG → 1 SHORT, 1 MEDIUM, 12 LONG
+Direction, on the calls each model shares with Fable:
 
-Qwen, direction, 59 shared calls | Qwen, horizon
---- | ---
-BUY → 45 BUY, 0, 0 | SHORT → 23 SHORT, 1 MEDIUM, 0
-NEUTRAL → 0, 1 NEUTRAL, 1 SELL | MEDIUM → 4 SHORT, 12 MEDIUM, 2 LONG
-SELL → 0, 1 NEUTRAL, 11 SELL | LONG → 1 SHORT, 1 MEDIUM, 15 LONG
+| model | BUY → | NEUTRAL → | SELL → |
+|---|---|---|---|
+| Opus 5.5 | 96 BUY, 0, 0 | 1 BUY, 8 NEUTRAL, 0 | 0, 2 NEUTRAL, 30 SELL |
+| Jev @0.3 | 87 BUY, 0, 0 | 0, 7 NEUTRAL, 1 SELL | 1 BUY, 2 NEUTRAL, 25 SELL |
+| Qwen3.6-35B | 87 BUY, 0, 0 | 2 BUY, 0, 1 SELL | 0, 2 NEUTRAL, 28 SELL |
+| Qwen3-30B | 76 BUY, 0, 1 SELL | 5 BUY, 1 NEUTRAL, 1 SELL | 4 BUY, 0, 20 SELL |
 
-Neither model flipped BUY and SELL even once. Every direction miss involves NEUTRAL: two-sided level conditionals, "local top forming, eyes on 74k", a support level "which should hold". Every
-horizon miss is MEDIUM bleeding into a neighbour. Jev leans SHORT (its predicted mix is 44/15/21 against the
-reference's 32/26/22); Qwen is closer at 39/24/23.
+Horizon:
 
-### By asset (Jev @0.3 / Qwen)
+| model | SHORT → | MEDIUM → | LONG → |
+|---|---|---|---|
+| Opus 5.5 | 51 SHORT, 6 MEDIUM, 0 | 3, 29 MEDIUM, 3 | 0, 3 MEDIUM, 42 LONG |
+| Jev @0.3 | 52 SHORT, 4 MEDIUM, 0 | 9 SHORT, 18 MEDIUM, 4 | 2, 2, 32 LONG |
+| Qwen3.6-35B | 47 SHORT, 5 MEDIUM, 0 | 3, 21 MEDIUM, 4 | 1, 10 MEDIUM, 29 LONG |
+| Qwen3-30B | 35 SHORT, 11 MEDIUM, 0 | 6, 19 MEDIUM, 4 | 5, 6, 22 LONG |
 
-| Asset | ref calls | recall | precision | direction | horizon |
+Opus, Jev and the 35B between them flip BUY and SELL twice in 380 shared calls. The 30B does it five times in 108,
+and it also reads 5 of 7 NEUTRAL calls as BUY, so it does not really get two-sided level conditionals ("above X
+bullish, below X bearish"), which the other three handle.
+
+Horizon errors have a signature per model. Jev pushes MEDIUM into SHORT (9 of 31 reference-MEDIUM calls; its
+predicted mix is 100/31/47 against Fable's 61/39/51). The 35B pushes LONG into MEDIUM (10 of 40). Opus is
+symmetric and small. The 30B is off in every direction at once.
+
+### By asset (recall / precision / direction / horizon)
+
+| asset | ref calls | Opus 5.5 | Jev @0.3 | Qwen3.6-35B | Qwen3-30B |
 |---|---|---|---|---|---|
-| BTC | 48 | 0.83 / 0.77 | 0.78 / 0.74 | 0.93 / 0.95 | 0.75 / 0.81 |
-| GOLD | 15 | 0.80 / 0.87 | 0.67 / 0.57 | 1.00 / 1.00 | 0.92 / 0.85 |
-| SPX | 17 | 0.47 / 0.53 | 0.73 / 0.69 | 0.88 / 1.00 | 0.88 / 1.00 |
+| BTC | 95 | 0.92 / 0.89 / 0.98 / 0.87 | 0.86 / 0.74 / 0.96 / 0.82 | 0.81 / 0.73 / 0.95 / 0.83 | 0.84 / 0.62 / 0.86 / 0.70 |
+| GOLD | 26 | 0.85 / 0.76 / 1.00 / 0.86 | 0.81 / 0.66 / 1.00 / 0.86 | 0.85 / 0.49 / 0.95 / 0.73 | 0.58 / 0.44 / 1.00 / 0.73 |
+| SPX | 30 | 0.93 / 0.70 / 0.96 / 0.96 | 0.67 / 0.57 / 0.95 / 0.85 | 0.70 / 0.68 / 1.00 / 0.81 | 0.43 / 0.50 / 1.00 / 0.69 |
 
-S&P 500 calls are hard for both. The reference counts positioning statements ("added a small handful of longs",
-"splitting my remaining long into two tranches") and index-move commentary as calls; both models read those as
-observations. I am honestly not sure the reference is right on all of them.
+S&P 500 calls are the hard ones for everything below the frontier. Fable counts positioning statements ("added a
+small handful of longs", "still holding our SPY short") and index-move commentary with a stance as calls; the
+non-frontier models read many of those as observations.
 
-### The production hybrid: Jev gate, then Qwen labels
+### By year (recall / precision / direction / horizon)
 
-| Gate | tweets passed to Qwen | recall | precision | direction | horizon | e2e cell |
+| year | tweets | ref calls | Opus 5.5 | Jev @0.3 | Qwen3.6-35B | Qwen3-30B |
 |---|---|---|---|---|---|---|
-| no gate (Qwen alone) | 400 (100 %) | 0.74 | 0.69 | 0.97 | 0.85 | 0.60 |
-| Jev p ≥ 0.2 | 90 (22 %) | 0.70 | 0.78 | 0.96 | 0.84 | 0.56 |
-| Jev p ≥ 0.3 (current) | 75 (19 %) | 0.65 | 0.79 | 0.96 | 0.83 | 0.51 |
-| stance ≠ none only | 108 (27 %) | 0.71 | 0.71 | 0.96 | 0.84 | 0.57 |
+| 2023 | 139 | 14 | 1.00 / 0.74 / 1.00 / 0.71 | 0.86 / 0.52 / 1.00 / 0.75 | 0.93 / 0.68 / 1.00 / 0.69 | 0.79 / 0.50 / 0.91 / 0.55 |
+| 2024 | 290 | 36 | 0.83 / 0.75 / 0.97 / 0.90 | 0.78 / 0.64 / 0.96 / 0.93 | 0.81 / 0.62 / 1.00 / 0.79 | 0.58 / 0.55 / 1.00 / 0.76 |
+| 2025 | 290 | 48 | 0.94 / 0.87 / 1.00 / 0.84 | 0.81 / 0.68 / 0.97 / 0.72 | 0.77 / 0.69 / 0.95 / 0.81 | 0.71 / 0.53 / 0.85 / 0.68 |
+| 2026 | 281 | 53 | 0.91 / 0.86 / 0.96 / 0.98 | 0.83 / 0.81 / 0.95 / 0.89 | 0.77 / 0.67 / 0.93 / 0.85 | 0.79 / 0.66 / 0.88 / 0.74 |
 
-The gate at 0.3 costs 9 points of recall against ungated Qwen and cuts GPU work by 81 %. At 0.2 it costs 4 points
-and cuts 78 %. Precision actually goes up under the gate, because Jev and Qwen make different false positives and
-the conjunction removes some of each.
+No drift by year worth talking about. The 2023 precision dip is 14 reference calls; one extra call moves it 5 points.
 
-### What Jev misses (p ≥ 0.3, 20 of 80 reference calls)
+### How much the models agree with each other (F1 on calls / direction / horizon on shared)
 
-14 of the 20 misses sit at p_call 0.1 to 0.2, only 6 above. That band is the interesting one. Jev has already
-assigned the right stance to most of them (`stance=up` or `down`), the noul just says "probably not a call":
+| | Opus 5.5 | Jev @0.3 | Qwen3.6-35B | Qwen3-30B |
+|---|---|---|---|---|
+| Opus 5.5 | | 0.72 / 0.95 / 0.86 | 0.70 / 0.97 / 0.79 | 0.61 / 0.90 / 0.74 |
+| Jev @0.3 | 0.72 / 0.95 / 0.86 | | 0.74 / 0.91 / 0.77 | 0.67 / 0.89 / 0.75 |
+| Qwen3.6-35B | 0.70 / 0.97 / 0.79 | 0.74 / 0.91 / 0.77 | | 0.64 / 0.92 / 0.72 |
 
-- "There's a 65% chance of a US strategic reserve for Bitcoin and you can still buy it for under $70K" (p 0.22, stance up)
-- "Price still in the LGC buy-zone for investors" (p 0.22, stance up)
-- "This is EXACTLY why I have been warning you guys that stage 3 was NOT a place to long" (p 0.22, stance down)
-- "Stage 4 downtrend, and indicators all red. Nothing here excites me" (p 0.22, stance down)
+Jev and the production 35B agree with each other (F1 0.74) about as much as either agrees with Opus. A `dir-disagree`
+audit flag where Jev's stance differs from the 35B's direction costs nothing and would catch the two-sided and
+support-level cases that trip both.
 
-These are implicit calls. The stance is in the framing; the tweet never says "will go up". My instructions carry
-"be strict, when in doubt answer no", and that phrase is what pushes them down to 0.2. Qwen misses the same
-tweets, so this is a prompt problem before it is a model problem.
+### The production hybrid: Jev gate, then Qwen3.6 labels
 
-### What Jev adds (20 extras at p ≥ 0.3)
+| gate | passed to the GPU | recall | precision | direction | horizon | e2e cell |
+|---|---|---|---|---|---|---|
+| none (35B alone) | 1,000 (100 %) | 0.79 | 0.66 | 0.96 | 0.81 | 0.62 |
+| Jev p ≥ 0.2 | 202 (20 %) | 0.77 | 0.79 | 0.96 | 0.82 | 0.60 |
+| Jev p ≥ 0.3 (current) | 171 (17 %) | 0.72 | 0.79 | 0.95 | 0.82 | 0.56 |
 
-Chart captions ("#Bitcoin $40k🚀" plus an image, "The Daily Downtrend is over" plus an image), macro narratives with
-no price claim (national-debt tweets come back as GOLD BUY LONG), and one tweet about another asset that happens to
-carry a #Bitcoin tag ($GME → BTC BUY). The SYSTEM prompt's NOT-a-call list names all three cases. In the typed
-decomposition they are strings inside `instructions`, and the noul does not weigh them as hard as a text model
-reading the same prompt does.
+At 0.2 the gate costs 2 points of recall against the ungated 35B and cuts GPU work by 80 %. At 0.3, the threshold
+in production today, it costs 7 points for 83 %. Precision goes up under either gate, because Jev and the 35B make
+different false positives and the conjunction removes some of each.
 
-## How much do two frontier models even agree?
+### What nobody finds
 
-Before grading anything against Opus I wanted to know what "right" looks like. The first gold set was labeled by
-Claude Fable 5.1 in an interactive session. I re-labeled its 105 English tweets with Opus 5.5
-(`scripts/frontier_ceiling.py`):
+Four of the 151 reference calls are missed by all four models:
 
-| Comparison | n | recall | precision | F1 | direction | horizon | cell |
-|---|---|---|---|---|---|---|---|
-| Opus 5.5 vs Fable 5.1 | 105 | 1.00 | 0.93 | 0.96 | 0.92 | 0.92 | 0.85 |
-| Jev @0.3 vs Fable | 87 | 1.00 | 0.78 | 0.88 | 1.00 | 0.57 | 0.57 |
-| Jev @0.3 vs Opus | 87 | 0.88 | 0.78 | 0.82 | 1.00 | 0.43 | 0.43 |
-| Qwen vs Fable | 105 | 0.85 | 0.92 | 0.88 | 1.00 | 0.73 | 0.73 |
-| Qwen vs Opus | 105 | 0.79 | 0.92 | 0.85 | 1.00 | 0.82 | 0.82 |
+- "Bitcoin is the ultimate hedge against chaos. $BTC" (Fable: BTC BUY LONG)
+- "None of us own enough hard assets." (GOLD BUY LONG)
+- "Welcome to an unhinged inflationary era. Game on." (GOLD BUY LONG)
+- "2025 will be a big year. Deregulation is bullish as fk." (SPX BUY MEDIUM)
 
-The two frontier models agree on is_call for 99 % of tweets (the one disagreement is a halving-cycle progress bar).
-On direction and horizon they disagree on 2 of the 13 calls they share: NEUTRAL versus BUY on a two-sided level, and
-LONG versus MEDIUM on an undated cycle claim. So roughly 0.92 on direction and 0.92 on horizon is the ceiling, and
-nobody should be graded against 1.00. This holdout only has 7 to 14 calls depending on who you ask, so quote the
-400-tweet numbers above, not these.
+Reading them, I would not have called two of these. Fable is generous with thesis statements that never mention a
+price, and that generosity is part of the reference. Eight more reference calls are found by Opus and by nothing
+else; those are the implicit calls where the stance lives in the framing.
 
 ## What I take from it
 
-Jev is the best is_call model I have. At p ≥ 0.2 it finds 87 % of the reference call tweets at 0.912 accuracy,
-against 75 % and 0.892 for the 35B I run in production. It does that in a quarter of a second per tweet, for six
-thousandths of a cent, about 90 times faster than the local GPU path. I went in treating it as a cheap filter and
-came out with it beating the classifier at the classifier's first job.
+Opus 5.5 against Fable 5.1 sets the ceiling: F1 0.86, direction 0.98, horizon 0.89 on 137 shared calls. Two frontier
+models reading the same rules still disagree on 1 call in 10 about whether it is a call at all, and on 1 in 9 about
+horizon. I keep that in mind when reading every row below; 1.00 was never on the table.
 
-On direction Jev is at the ceiling. 0.93 to 0.94 agreement with Opus on the 400, 1.00 with both frontier models on
-the holdout, and it never swapped BUY for SELL. For "which way" alone, Jev is enough.
+Jev is the best non-frontier model I have on the thing it is built for. At p ≥ 0.2 it finds 90 % of the reference
+call tweets, against 81 % for the 35B I run in production and 74 % for the 30B before it, and it does that in a
+quarter of a second per tweet for six thousandths of a cent. I went in treating it as a cheap filter and it came out ahead
+of the classifier at the classifier's first job, which I did not expect.
 
-Horizon is where it slips, and the reason is structural rather than a capability gap. 0.80 against Qwen's 0.85 and
-the 0.92 ceiling, with the loss concentrated in MEDIUM. MEDIUM in my rules means "an undated expectation with no
-level game and no structural argument". It is defined by what it is not, and a three-way choice question has no way
-to say "neither of the other two". I want to try two nouls instead, "is this a level or pattern trade?" and "is this
-a structural, multi-year thesis?", with MEDIUM as the answer when both come back low. I have not run that yet.
+On direction Jev sits with the frontier. 0.97 against Opus's 0.98, and one BUY/SELL flip in 123 shared calls.
+For "which way" alone, Jev is enough.
+
+Horizon is where the gap is, and I think the cause is the question shape, not the model. 0.83 against the 35B's
+0.81 and the 0.89 ceiling, with the loss concentrated in MEDIUM. MEDIUM in my rules means "an undated expectation
+with no level game and no structural argument". It is defined by what it is not, and a three-way choice question
+has no way to say "neither of the other two". I want to try two nouls instead, "is this a level or pattern trade?"
+and "is this a structural, multi-year thesis?", with MEDIUM as the answer when both come back low. I have not run
+that yet.
+
+Precision is Jev's real weakness, not horizon. 0.63 at the threshold that gives the best recall. The extras are
+chart captions with an image, macro narratives with no price claim (national-debt tweets come back as GOLD BUY LONG),
+and tweets about another asset that carry a #Bitcoin tag. The SYSTEM prompt's NOT-a-call list names all three. In the
+typed decomposition they are strings inside `instructions`, and the noul does not weigh them as hard as a text model
+reading the same prompt does.
 
 The threshold belongs to the prompt. "Be strict, when in doubt answer no" pushes implicit calls to p ≈ 0.2, and on
 this set 0.2 beats 0.3 on every end-to-end number. The production gate should move to 0.2: hybrid recall goes from
-0.65 to 0.70 and the GPU sees 15 more tweets per 400.
+0.72 to 0.77 and the GPU sees 3 % more tweets.
+
+The 35B over the 30B was the right swap, and now I can say by how much: F1 0.72 against 0.64, direction 0.96 against
+0.90, horizon 0.81 against 0.70, and twice the throughput. The 30B's five BUY/SELL flips in 108 calls would have put
+wrong-sign votes into the matrix.
 
 None of this lets Jev replace the text model, and it has nothing to do with accuracy. There is no quote, which is
 the evidence column on the audit page, and no price target, which earns or loses credit in scoring. Jev decides
-whether a tweet is worth reading closely; the text model does the close reading. Until this week that split was an
-assumption. Now it has numbers.
-
-Jev and Qwen also disagree with each other about as much as either disagrees with Opus
-(F1 0.78, direction 0.92, horizon 0.82 between them). Flagging calls where Jev's stance differs from Qwen's direction
-costs nothing and would surface exactly the two-sided and support-level cases that trip both.
+whether a tweet is worth reading closely and the text model does the close reading. I had been running that split
+on an assumption; now I know what each half costs and what it buys.
 
 ## Reproduce
 
 ```
-PYTHONPATH=. .venv/bin/python scripts/sample_tweets.py 400 8                     # data/pending_en.jsonl
-PYTHONPATH=. .venv/bin/python scripts/label_frontier.py data/pending_en.jsonl data/labels_en_opus55.jsonl 40 4
-PYTHONPATH=. .venv/bin/python scripts/jev_answers.py data/pending_en.jsonl en    # data/jev_raw_en.jsonl
-PYTHONPATH=. .venv/bin/python scripts/qwen_answers.py data/pending_en.jsonl en   # data/qwen_preds_en.jsonl (Ollama up)
-PYTHONPATH=. .venv/bin/python scripts/compare_labelers.py en
-PYTHONPATH=. .venv/bin/python scripts/frontier_ceiling.py
+PYTHONPATH=. .venv/bin/python scripts/sample_tweets.py 400 8 data/pending_en.jsonl
+PYTHONPATH=. .venv/bin/python scripts/sample_tweets.py 600 12 data/pending_en2.jsonl --exclude data/pending_en.jsonl --seed 20260930
+cat data/pending_en.jsonl data/pending_en2.jsonl > data/pending_en1000.jsonl
+PYTHONPATH=. FRONTIER_MODEL=claude-fable-5-1 .venv/bin/python scripts/label_frontier.py data/pending_en1000.jsonl data/labels_en1000_fable51.jsonl 40 4
+PYTHONPATH=. FRONTIER_MODEL=claude-opus-5-5 .venv/bin/python scripts/label_frontier.py data/pending_en1000.jsonl data/labels_en_opus55.jsonl 40 4
+PYTHONPATH=. .venv/bin/python scripts/jev_answers.py data/pending_en.jsonl en
+PYTHONPATH=. .venv/bin/python scripts/jev_answers.py data/pending_en2.jsonl en2
+PYTHONPATH=. .venv/bin/python scripts/qwen_answers.py data/pending_en.jsonl en          # Ollama up
+PYTHONPATH=. .venv/bin/python scripts/qwen_answers.py data/pending_en2.jsonl en2
+PYTHONPATH=. FINCLATOR_MODEL=qwen3:30b-a3b-instruct-2507-q4_K_M .venv/bin/python scripts/qwen_answers.py data/pending_en1000.jsonl en1000 qwen30b
+PYTHONPATH=. .venv/bin/python scripts/compare_four.py
 ```
 
-`label_frontier.py` runs the frontier model through `hermes chat -m claude-opus-5-5 --reasoning high` with the
-SYSTEM prompt in the query, so the reference labels come from the same rules as every other labeler.
-`jev_answers.py` reads `TYPESAFE_API_KEY` from `.env`.
+`label_frontier.py` runs the frontier model through `hermes chat -m <model> --reasoning high` with the SYSTEM
+prompt in the query, so both frontier label sets come from the same rules as every other labeler. It is resumable:
+ids already in the output file are skipped. `jev_answers.py` reads `TYPESAFE_API_KEY` from `.env`.
+
+## Earlier run: 400 tweets against Opus 5.5
+
+The first pass used the first 400 of these tweets with Opus 5.5 as the reference (`scripts/compare_labelers.py en`).
+Same ranking, same shape: Jev p ≥ 0.2 recall 0.85 / direction 0.94 / horizon 0.81, the 35B recall 0.74 / direction
+0.97 / horizon 0.85. The 1,000-tweet Fable numbers above supersede it. The 105-tweet English holdout where Opus and
+Fable agreed on direction and horizon at 0.92 (`scripts/frontier_ceiling.py`) is likewise superseded by the 137
+shared calls here.
 
 ## Still to do
 
@@ -207,5 +242,5 @@ SYSTEM prompt in the query, so the reference labels come from the same rules as 
 - Gate threshold 0.3 → 0.2 in `src/gate.py`, then re-measure the daily pass rate.
 - A Jev-only matrix from the full corpus (about 10 minutes and $3) next to the production matrix, as a talk
   artifact. The audit page has to tolerate NULL quotes first.
-- The 400-set reference is one frontier model's opinion. Fable versus Opus says about 8 % of direction and horizon
-  labels are judgment calls, so a second frontier pass on the 400 would give the ceiling on the same set.
+- Adjudicate the 30 calls where Opus and Fable disagree. Whichever way they go, that is the noise floor of the
+  reference.

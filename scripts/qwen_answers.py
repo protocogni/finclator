@@ -1,6 +1,6 @@
-"""Score the production Qwen classifier (batch-4, terse, think off, 8 workers) on a pending JSONL — same code paths as
-production (classify.make_batch_classifier) — and write preds to data/qwen_preds_<tag>.jsonl.
-Usage: PYTHONPATH=. .venv/bin/python scripts/qwen_answers.py <pending.jsonl> <tag>"""
+"""Score a local Ollama classifier (batch-4, terse, think off, 8 workers) on a pending JSONL — same code paths as
+production (classify.make_batch_classifier) — and write preds to data/<prefix>_preds_<tag>.jsonl.
+Usage: PYTHONPATH=. [FINCLATOR_MODEL=<ollama tag>] .venv/bin/python scripts/qwen_answers.py <pending.jsonl> <tag> [prefix=qwen]"""
 import json
 import os
 import sys
@@ -15,6 +15,7 @@ os.environ.setdefault("FINCLATOR_GATE", "0")
 from src import classify  # noqa: E402
 
 src, tag = Path(sys.argv[1]), sys.argv[2]
+prefix = sys.argv[3] if len(sys.argv) > 3 else "qwen"
 rows = [json.loads(ln) for ln in open(src) if ln.strip()]
 print(f"{len(rows)} tweets → {classify.TEXT_MODEL} batch={classify.BATCH_SIZE} workers={classify.WORKERS} "
       f"terse={classify.TERSE} think={classify.THINK}", flush=True)
@@ -35,7 +36,7 @@ with ThreadPoolExecutor(max_workers=classify.WORKERS) as pool:
         if done % 80 == 0:
             print(f"  {done}/{len(rows)}  {60 * done / (time.time() - t0):.0f} tw/min", flush=True)
 dt = time.time() - t0
-out = Path(f"data/qwen_preds_{tag}.jsonl")
+out = Path(f"data/{prefix}_preds_{tag}.jsonl")
 with open(out, "w") as f:
     for t in rows:
         f.write(json.dumps({"id": t["id"], "text": t["text"], "assets_hint": t["assets_hint"], "pred": preds[t["id"]]},
