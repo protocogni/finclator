@@ -38,8 +38,8 @@ def test_wrong_side_target_gets_no_credit(tmp_path):
     for i in range(0, 120):
         day = date.fromordinal(d.toordinal() + i).isoformat()
         conn.execute("INSERT INTO prices(asset, date, close) VALUES('BTC', ?, ?)", (day, 40_000 + 50 * i))
-    conn.execute("INSERT INTO tweets(id, handle, created_at, text, source) VALUES('t1','a',?, 'x', 'csv')", (d.isoformat(),))
-    conn.execute("INSERT INTO tweets(id, handle, created_at, text, source) VALUES('t2','a',?, 'x', 'csv')", (d.isoformat(),))
+    conn.execute("INSERT INTO tweets(tweet_id, handle, created_at, text, source) VALUES('t1','a',?, 'x', 'csv')", (d.isoformat(),))
+    conn.execute("INSERT INTO tweets(tweet_id, handle, created_at, text, source) VALUES('t2','a',?, 'x', 'csv')", (d.isoformat(),))
     # BUY with a target BELOW entry (40,000): old code marked it HIT because max(close) ≥ entry ≥ target
     conn.execute("INSERT INTO calls(tweet_id, handle, asset, direction, horizon, confidence, price_target, called_at, model) "
                  "VALUES('t1','a','BTC','BUY','SHORT',0.8,30000,?, 'm')", (d.isoformat() + "T00:00:00+00:00",))

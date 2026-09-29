@@ -80,7 +80,7 @@ def _insert(conn: sqlite3.Connection, rows: list[dict]) -> int:
             continue  # originals only — enforced here regardless of source
         rel, assets = is_relevant(r["text"], False)
         cur = conn.execute(
-            """INSERT OR IGNORE INTO tweets(id, handle, created_at, text, is_reply, lang, source, assets_hint, relevant)
+            """INSERT OR IGNORE INTO tweets(tweet_id, handle, created_at, text, is_reply, lang, source, assets_hint, relevant)
                VALUES(?,?,?,?,?,?,?,?,?)""",
             (r["id"], r["handle"], r["created_at"], r["text"], int(r["is_reply"]), r.get("lang"),
              r["source"], ",".join(assets), int(rel)),

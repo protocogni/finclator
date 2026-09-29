@@ -86,10 +86,13 @@ async function tailLog(){const el=document.getElementById('log');if(!el)return;
  try{const t=await (await fetch(LOG_URL)).text();if(t!==el.textContent){el.textContent=t;
  if(document.getElementById('follow').checked)el.scrollTop=el.scrollHeight;}}catch(e){}}
 window.addEventListener('load',()=>{const el=document.getElementById('log');if(el){el.scrollTop=el.scrollHeight;setInterval(tailLog,3000);}});
-// influencer-link clicks → /api/click (which accounts people actually look at; see Progress → "most clicked")
-document.addEventListener('click',e=>{const a=e.target.closest('a[href^="https://x.com/"]');if(!a)return;
- const h=a.getAttribute('href').split('/')[3];if(!h||h==='status')return;
- const body=JSON.stringify({handle:h,src:document.body.dataset.tab||'',page:location.pathname});
+// every click on the panel → /api/click (influencer x.com links carry the handle; any other link/button is stored too)
+if(!localStorage.fcv){localStorage.fcv=Math.random().toString(36).slice(2,12)}
+document.addEventListener('click',e=>{const el=e.target.closest('a,button,summary,th,input[type=checkbox]');if(!el)return;
+ const href=el.getAttribute&&el.getAttribute('href')||'';let h=null;
+ if(href.startsWith('https://x.com/')){const p=href.split('/')[3];if(p&&p!=='status')h=p}
+ const body=JSON.stringify({handle:h,kind:h?'influencer':(el.tagName==='A'?'link':'button'),href:href.slice(0,200),
+  label:(el.textContent||'').trim().slice(0,80),src:document.body.dataset.tab||'',page:location.pathname,visitor:localStorage.fcv});
  try{navigator.sendBeacon(CLICK_URL,new Blob([body],{type:'application/json'}))}catch(x){}});
 """
 
@@ -183,34 +186,58 @@ def _page(title: str, body: str, active: str) -> str:
             f"<main>{_wrap_tables(body)}</main></body>")
 
 
-def record_click(conn, handle: str, src: str | None, page: str | None, who: str | None) -> bool:
-    """Store one influencer-link click. Handle must be on the roster (drops junk); src/page are clipped."""
-    handle = (handle or "").strip().lstrip("@").lower()[:40]
-    if not handle or not _one(conn, "SELECT 1 FROM accounts WHERE handle=?", handle):
+def record_click(conn, handle: str | None, src: str | None, page: str | None, who: str | None,
+                 kind: str | None = None, href: str | None = None, label: str | None = None,
+                 visitor: str | None = None) -> bool:
+    """Store one click. An influencer click needs a roster handle (junk is dropped); any other link/button is stored
+    with `kind` link|button, `href` and `label`. Returns False only when nothing was stored."""
+    handle = (handle or "").strip().lstrip("@").lower()[:40] or None
+    if handle and not _one(conn, "SELECT 1 FROM accounts WHERE handle=?", handle):
+        handle = None
+    kind = (kind or ("influencer" if handle else "link"))[:20]
+    if kind == "influencer" and not handle:
         return False
-    conn.execute("INSERT INTO clicks(at, handle, src, page, who) VALUES(datetime('now'), ?, ?, ?, ?)",
-                 (handle, (src or "")[:40] or None, (page or "")[:120] or None, (who or "")[:120] or None))
+    if not handle and not (href or label):
+        return False
+    conn.execute("INSERT INTO clicks(at, kind, handle, href, label, src, page, who, visitor) "
+                 "VALUES(datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)",
+                 (kind, handle, (href or "")[:200] or None, (label or "")[:80] or None, (src or "")[:40] or None,
+                  (page or "")[:120] or None, (who or "")[:120] or None, (visitor or "")[:40] or None))
     conn.commit()
     return True
 
 
+def record_click_body(conn, body: dict, who: str | None) -> bool:
+    """record_click from a /api/click JSON body (shared by the local server and the hosted panel)."""
+    return record_click(conn, body.get("handle"), body.get("src"), body.get("page"), who, kind=body.get("kind"),
+                        href=body.get("href"), label=body.get("label"), visitor=body.get("visitor"))
+
+
 def click_stats(conn, days: int = 30, limit: int = 15) -> dict:
-    """{'days', 'total', 'clickers', 'top': [{handle, n, who}], 'by_src': {src: n}} over the last `days` days."""
+    """{'days', 'total', 'clickers', 'visitors', 'influencer', 'top': [{handle, n, who}], 'by_src', 'by_kind',
+    'top_links': [{href, label, n}]} over the last `days` days."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    t = _one(conn, "SELECT count(*) n, count(DISTINCT who) w FROM clicks WHERE at >= ?", since)
+    t = _one(conn, "SELECT count(*) n, count(DISTINCT who) w, count(DISTINCT visitor) v, "
+                   "coalesce(sum(CASE WHEN handle IS NOT NULL THEN 1 ELSE 0 END),0) i FROM clicks WHERE at >= ?", since)
     top = [{"handle": r["handle"], "n": r["n"], "who": r["w"]} for r in _q(
-        conn, "SELECT handle, count(*) n, count(DISTINCT who) w FROM clicks WHERE at >= ? GROUP BY handle "
-              "ORDER BY n DESC, handle LIMIT ?", since, limit)]
+        conn, "SELECT handle, count(*) n, count(DISTINCT who) w FROM clicks WHERE at >= ? AND handle IS NOT NULL "
+              "GROUP BY handle ORDER BY n DESC, handle LIMIT ?", since, limit)]
     by_src = {r["src"] or "?": r["n"] for r in _q(
         conn, "SELECT src, count(*) n FROM clicks WHERE at >= ? GROUP BY src ORDER BY n DESC", since)}
-    return {"days": days, "total": t["n"], "clickers": t["w"], "top": top, "by_src": by_src}
+    by_kind = {r["kind"] or "?": r["n"] for r in _q(
+        conn, "SELECT kind, count(*) n FROM clicks WHERE at >= ? GROUP BY kind ORDER BY n DESC", since)}
+    top_links = [{"href": r["href"], "label": r["label"], "n": r["n"]} for r in _q(
+        conn, "SELECT href, min(label) label, count(*) n FROM clicks WHERE at >= ? AND handle IS NULL AND href IS NOT NULL "
+              "GROUP BY href ORDER BY n DESC LIMIT ?", since, limit)]
+    return {"days": days, "total": t["n"], "clickers": t["w"], "visitors": t["v"], "influencer": t["i"],
+            "top": top, "by_src": by_src, "by_kind": by_kind, "top_links": top_links}
 
 
 def status(conn) -> dict:
     model = active_model()
     f = _one(conn, """SELECT count(*) t, coalesce(sum(relevant),0) rel,
                        coalesce(sum(is_reply),0) replies, coalesce(sum(CASE WHEN text LIKE 'RT @%' THEN 1 ELSE 0 END),0) rts,
-                       (SELECT count(*) FROM classified_by b JOIN tweets x ON x.id=b.tweet_id WHERE b.model=? AND x.relevant=1) cls,
+                       (SELECT count(*) FROM classified_by b JOIN tweets x ON x.tweet_id=b.tweet_id WHERE b.model=? AND x.relevant=1) cls,
                        (SELECT count(*) FROM calls WHERE model=?) calls,
                        (SELECT count(*) FROM outcomes o JOIN calls c ON c.id=o.call_id WHERE c.model=?) outs,
                        (SELECT count(*) FROM trust WHERE model=? AND asset='*' AND horizon='*') scored,
@@ -254,13 +281,13 @@ def account_rows(conn, model: str):
     """Per-account fetch/classify counts in one pass (was 6 correlated subqueries × 98 accounts ≈ 2.5 s on Neon)."""
     return _q(conn, """
         SELECT a.handle, a.school, a.sampling, a.rate_per_year, a.active, a.last_fetch_at,
-               count(t.id) n, coalesce(sum(t.relevant),0) rel,
+               count(t.tweet_id) n, coalesce(sum(t.relevant),0) rel,
                count(b.tweet_id) cls, coalesce(sum(cc.n),0) calls,
                min(t.created_at) f, max(t.created_at) l
         FROM accounts a
         LEFT JOIN tweets t ON t.handle=a.handle
-        LEFT JOIN classified_by b ON b.tweet_id=t.id AND b.model=?
-        LEFT JOIN (SELECT tweet_id, count(*) n FROM calls WHERE model=? GROUP BY tweet_id) cc ON cc.tweet_id=t.id
+        LEFT JOIN classified_by b ON b.tweet_id=t.tweet_id AND b.model=?
+        LEFT JOIN (SELECT tweet_id, count(*) n FROM calls WHERE model=? GROUP BY tweet_id) cc ON cc.tweet_id=t.tweet_id
         GROUP BY a.handle, a.school, a.sampling, a.rate_per_year, a.active, a.last_fetch_at
         ORDER BY n DESC""", model, model)
 
@@ -307,7 +334,7 @@ def page_progress(conn) -> str:
              f"<p class=help>never fetched: {', '.join('@' + e(h) for h in never) or '—'}</p>")
     B.append(f"<h2>Classification by {e(s['model'])} <small>({pct(s['classified'], s['relevant']):.1f}% of asset-mentioning tweets · newest first)</small></h2>"
              f"<div class=bar><i style='width:{pct(s['classified'], s['relevant']):.1f}%'></i></div>")
-    cov = _one(conn, "SELECT min(x.created_at) a, max(x.created_at) b FROM classified_by y JOIN tweets x ON x.id=y.tweet_id WHERE y.model=?", s["model"])
+    cov = _one(conn, "SELECT min(x.created_at) a, max(x.created_at) b FROM classified_by y JOIN tweets x ON x.tweet_id=y.tweet_id WHERE y.model=?", s["model"])
     if cov and cov["a"]:
         B.append(f"<p><small>tweets labeled by this model span {cov['a'][:10]} → {cov['b'][:10]}; trust needs calls older than 90 d (SHORT) / 365 d (MEDIUM) / 730 d (LONG).</small></p>")
 
@@ -325,6 +352,39 @@ def page_progress(conn) -> str:
                  f"<td class=num>{last:,.2f}</td><td class={cls}>{age}d</td></tr>")
     B.append("</table>")
 
+    # pipeline runs (src.run writes one row per run) and daily reports
+    runs = _q(conn, "SELECT id, started_at, finished_at, status, stages, error, args FROM runs ORDER BY id DESC LIMIT 10")
+    B.append("<h2>Pipeline runs <small>· last 10 · one row per <code>src.run</code></small></h2>")
+    if runs:
+        B.append("<table class=sortable><thead><tr><th>#</th><th>started (UTC)</th><th>finished</th><th>status</th>"
+                 "<th title='stage → result, in execution order'>stages</th></tr></thead><tbody>")
+        for r in runs:
+            try:
+                st = json.loads(r["stages"] or "{}")
+            except ValueError:
+                st = {}
+            stages = " · ".join(f"{k} <small>{e(str(v.get('result'))[:60])}</small>" for k, v in st.items())
+            cls = {"ok": "ok", "failed": "err", "running": "warn"}.get(r["status"], "")
+            err = f"<br><small class=err>{e((r['error'] or '').splitlines()[0][:160])}</small>" if r["error"] else ""
+            B.append(f"<tr><td class=num>{r['id']}</td><td>{e(r['started_at'] or '')}</td><td>{e(r['finished_at'] or '–')}</td>"
+                     f"<td class={cls}>{e(r['status'])}{err}</td><td>{stages}</td></tr>")
+        B.append("</tbody></table>")
+    else:
+        B.append("<p class=help>No runs recorded yet — the next <code>src.run</code> writes one.</p>")
+    reps = _q(conn, "SELECT id, at, subject, recipients, sent, problems FROM reports ORDER BY id DESC LIMIT 7")
+    if reps:
+        B.append("<h2>Daily reports <small>· last 7</small></h2><table class=sortable><thead><tr><th>#</th><th>sent (UTC)</th>"
+                 "<th>subject</th><th>to</th><th title='mail API response'>delivery</th><th>problems</th></tr></thead><tbody>")
+        for r in reps:
+            try:
+                probs = len(json.loads(r["problems"] or "[]"))
+            except ValueError:
+                probs = "?"
+            B.append(f"<tr><td class=num>{r['id']}</td><td>{e(r['at'])}</td><td>{e(r['subject'])}</td>"
+                     f"<td><small>{e(r['recipients'] or '')}</small></td><td><small>{e((r['sent'] or '')[:80])}</small></td>"
+                     f"<td class=num>{probs}</td></tr>")
+        B.append("</tbody></table>")
+
     B.append("<h2>Per-account fetch <small>· classified / calls are for the active model</small></h2><table class=sortable><thead><tr><th>account</th><th>school</th><th>sampling</th>"
              "<th title='measured originals per year at backfill (rate estimate)'>orig/yr</th><th title='original tweets stored'>tweets</th>"
              "<th title='passed the asset-mention prefilter'>relevant</th><th title='labeled by the active model'>classified</th><th title='calls by the active model'>calls</th><th>first</th><th>last</th><th title='fetch watermark: the next run searches from here (minus a 6 h overlap)'>fetched</th></tr></thead><tbody>")
@@ -339,20 +399,30 @@ def page_progress(conn) -> str:
                  f"<td>{(r['last_fetch_at'] or '')[:16].replace('T', ' ')}</td></tr>")
     B.append("</tbody></table><p class=help>amber <i>last</i> = active account with no stored tweet in 30 d — check the fetch.</p>")
 
-    # who gets looked at: influencer-link clicks on the panel + public site (JS beacon → /api/click → `clicks`)
+    # who gets looked at: every click on the panel + public site (JS beacon → /api/click → `clicks`)
     ck = click_stats(conn)
-    B.append(f"<h2>Most clicked influencers <small>· last {ck['days']} d · {ck['total']} clicks"
-             + (f" · {ck['clickers']} signed-in users" if ck["clickers"] else "") + "</small></h2>")
+    B.append(f"<h2>Clicks <small>· last {ck['days']} d · {ck['total']} clicks · {ck['influencer']} on influencers"
+             + (f" · {ck['clickers']} signed-in users" if ck["clickers"] else "")
+             + (f" · {ck['visitors']} browsers" if ck["visitors"] else "") + "</small></h2>")
     if ck["top"]:
-        B.append("<table class=sortable><thead><tr><th>account</th><th title='clicks on any x.com link for this account (profile or tweet), panel + public site'>clicks</th>"
+        B.append("<h3>Most clicked influencers</h3><table class=sortable><thead><tr><th>account</th><th title='clicks on any x.com link for this account (profile or tweet), panel + public site'>clicks</th>"
                  "<th title='distinct signed-in panel users who clicked; anonymous site visitors are not counted here'>users</th></tr></thead><tbody>")
         for t in ck["top"]:
             B.append(f"<tr><td><a href='{_u('/accounts')}#acc-{e(t['handle'])}' style='color:#9ecbff'>@{e(t['handle'])}</a></td>"
                      f"<td class=num>{t['n']}</td><td class=num>{t['who']}</td></tr>")
-        B.append("</tbody></table><p class=help>by source: " + " · ".join(f"{e(k)} {v}" for k, v in ck["by_src"].items()) +
-                 ". Every @account / tweet link on every tab and on the public site reports here.</p>")
+        B.append("</tbody></table>")
+    if ck["top_links"]:
+        B.append("<h3>Most clicked links and buttons</h3><table class=sortable><thead><tr><th>target</th><th>label</th><th>clicks</th></tr></thead><tbody>")
+        for t in ck["top_links"]:
+            B.append(f"<tr><td><small>{e(t['href'] or '')}</small></td><td>{e(t['label'] or '')}</td><td class=num>{t['n']}</td></tr>")
+        B.append("</tbody></table>")
+    if ck["total"]:
+        B.append("<p class=help>by page: " + " · ".join(f"{e(k)} {v}" for k, v in ck["by_src"].items())
+                 + " · by kind: " + " · ".join(f"{e(k)} {v}" for k, v in ck["by_kind"].items())
+                 + ". Every link and button on every tab and on the public site reports here; a browser id (no cookie) "
+                   "distinguishes anonymous visitors.</p>")
     else:
-        B.append("<p class=help>No clicks recorded yet — every @account / tweet link on the panel and the public site reports here.</p>")
+        B.append("<p class=help>No clicks recorded yet — every link and button on the panel and the public site reports here.</p>")
 
     if not _readonly():
         B.append("<h2>pipeline.log <small>(live, last 200 lines, UTC) · <label><input type=checkbox id=follow checked> follow</label></small></h2>"
@@ -556,7 +626,7 @@ def page_architecture(conn) -> str:
     e = html.escape
     model = active_model()
     f = _one(conn, """SELECT count(*) t, coalesce(sum(relevant),0) rel,
-                       (SELECT count(*) FROM classified_by b JOIN tweets x ON x.id=b.tweet_id WHERE b.model=? AND x.relevant=1) cls,
+                       (SELECT count(*) FROM classified_by b JOIN tweets x ON x.tweet_id=b.tweet_id WHERE b.model=? AND x.relevant=1) cls,
                        (SELECT count(*) FROM calls WHERE model=?) calls, (SELECT count(DISTINCT tweet_id) FROM calls WHERE model=?) ct,
                        (SELECT count(*) FROM outcomes o JOIN calls c ON c.id=o.call_id WHERE c.model=?) outs,
                        (SELECT count(*) FROM accounts) acc FROM tweets""", model, model, model, model)
@@ -742,13 +812,18 @@ def page_tables(conn, qs: str) -> str:
     tables = db.tables(conn)
     T = _u("/tables")
 
-    B = ["<h2>Tables</h2><p class=help>* = primary key. The hosted panel queries Postgres, the local admin SQLite — write portable SQL "
-         "(no PRAGMA, no sqlite_master; <code>CASE WHEN</code> instead of sum(bool)).</p><table><tr><th>table</th><th>rows</th><th>columns</th></tr>"]
+    B = ["<h2>Tables</h2><p class=help>Postgres (Neon) is the source of truth. <b>*</b> = primary key (every table: <code>id</code>, "
+         "identity), <u>underlined</u> = natural key (UNIQUE; inserts de-duplicate on it). Write portable SQL "
+         "(no PRAGMA, no sqlite_master; <code>CASE WHEN</code> instead of sum(bool)).</p>"
+         "<table><tr><th>table</th><th>rows</th><th>columns</th><th>natural key</th></tr>"]
     for t in tables:
         n = _one(conn, f"SELECT count(*) FROM {t}")[0]
         pk = db.primary_key(conn, t)
-        cols = ", ".join(c + ("*" if c in pk else "") for c in db.columns(conn, t))
-        B.append(f"<tr><td><a href='{T}?t={t}' style='color:#9ecbff'><b>{t}</b></a></td><td class=num>{n:,}</td><td><small>{e(cols)}</small></td></tr>")
+        uniq = db.unique_keys(conn, t)
+        ucols = {c for k in uniq for c in k}
+        cols = ", ".join((f"<u>{c}</u>" if c in ucols else c) + ("*" if c in pk else "") for c in db.columns(conn, t))
+        B.append(f"<tr><td><a href='{T}?t={t}' style='color:#9ecbff'><b>{t}</b></a></td><td class=num>{n:,}</td><td><small>{cols}</small></td>"
+                 f"<td><small>{e(' · '.join('(' + ', '.join(k) + ')' for k in uniq) or '–')}</small></td></tr>")
     B.append("</table>")
 
     B.append("<h2>SQL <small>(read-only; SELECT / WITH / EXPLAIN only, 500 rows max)</small></h2>"
@@ -822,7 +897,7 @@ class Handler(BaseHTTPRequestHandler):
             body = {}
         conn = connect()
         try:
-            ok = record_click(conn, body.get("handle", ""), body.get("src"), body.get("page"), None)
+            ok = record_click_body(conn, body, None)
         finally:
             conn.close()
         self._send(json.dumps({"ok": ok}), "application/json", 200 if ok else 400)

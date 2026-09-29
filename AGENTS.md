@@ -21,16 +21,27 @@ Surfaces: **finclator.com** (public landing + method page, gated admin panel), `
 - **Roster underperforms always-BUY at every horizon** (measured on the plain Qwen labels: SHORT 55 % vs 62 %,
   MEDIUM 71 % vs 81 %, LONG 76 % vs 83 %) — `score.hit_rates()`; shown on Matrix tab, `/method`, `site.json`. Say so
   when discussing "skill".
-- **Database is Postgres (Neon, Vercel team Protocogni Labs)** via `DATABASE_URL` in `.env`; `data/finclator.db` is an
-  untracked cold backup of the pre-migration state. `db.connect()` falls back to SQLite only when `DATABASE_URL` is unset.
+- **Database is Postgres (Neon, Vercel team Protocogni Labs) — the only source of truth** via `DATABASE_URL` in `.env`.
+  Every table has an `id BIGINT IDENTITY` primary key; the natural key is a UNIQUE constraint (`db.CONFLICT_KEYS`);
+  enums are CHECKed; every reference is an FK (`tests/test_schema.py`). `tweets.tweet_id` is the X id (queries alias
+  it `AS id` for consumers). Structural changes are `db.STEPS` (applied once on Postgres, recorded in
+  `schema_migrations`); additive columns are `db.MIGRATIONS`. SQLite exists only for tests (`connect(url="")`).
+  **Postgres catches type errors SQLite hides** (`bigint = text` when a query says `id` meaning `tweet_id`) — after
+  any SQL edit run `scripts/check_pages.py` against the local admin (it reads Neon), not only pytest.
+- **Backups**: `scripts/backup_db.py` (pg_dump custom format → `data/backups/`, keeps 14; runs first in `daily.sh`;
+  needs brew `libpq` v18 — `postgresql@16`'s pg_dump refuses Neon 18). Restore: `pg_restore --clean --if-exists
+  --no-owner -d "$DATABASE_URL" <file>`. Neon PITR is the second line.
+- **Run + report history in the DB**: `runs` (one row per `src.run`, per-stage results JSON, status, error) and
+  `reports` (one row per daily email: subject, recipients, delivery response, problems, labels, html); Progress tab
+  lists both. `clicks` stores **every** link/button click on the panel and finclator.com (`public/track.js` +
+  the panel JS; `kind` influencer|link|button, `href`, `label`, anonymous `visitor` id from localStorage).
 - Site live at **https://finclator.com** (DNS at Cloudflare, cert issued, www → apex). Resend mail from
   `admin@finclator.com` verified end-to-end (sign-in links deliver).
 - **Scheduled: launchd `com.finclator.daily` 06:00 local** runs `scripts/daily.sh` (src.run → `vercel deploy` →
   commit matrix.json/site.json/pine → push). Log `data/daily.log`. Install/refresh: `scripts/install_daily.py [--run-now|--remove]`.
 
 ## Dev environment
-- Python ≥3.11 (venv is 3.14 at `.venv`); `.venv/bin/pip install -e ".[dev]"` (or `scripts/bootstrap.sh`, which also
-  **wipes and rebuilds the DB** — don't run it casually).
+- Python ≥3.11 (venv is 3.14 at `.venv`); `.venv/bin/pip install -e ".[dev]"`.
 - Run modules as `.venv/bin/python -m src.<mod>`; scripts as `PYTHONPATH=. .venv/bin/python scripts/<x>.py`.
 - `.env` (gitignored): `DATABASE_URL` (Neon pooled), `TWITTERAPI_IO_KEY` (fetch), `TYPESAFE_API_KEY` (Jev gate;
   also a Sensitive Vercel var), `ANTHROPIC_API_KEY` (API-mode
@@ -64,19 +75,19 @@ Surfaces: **finclator.com** (public landing + method page, gated admin panel), `
 - Prefilter cases: `PYTHONPATH=. .venv/bin/python tests/test_prefilter.py` — a plain script printing `failures: N`.
   Unit tests: `.venv/bin/python -m pytest tests -q` (admin chrome, batch routing, hit_rates, matrix concentration).
   Lint: `.venv/bin/ruff check .` (line length 110, rules E/F/W/I/B; 3 B905 in src/ + 12 in scripts/ are known).
-- SQLite → Postgres (re)migration: `DATABASE_URL=<unpooled> PYTHONPATH=. .venv/bin/python scripts/migrate_to_pg.py --yes`
-  (truncates target, COPY, checksums, asserts identical matrix).
 
 ## Conventions (observed)
 - Module per pipeline stage in `src/` (`fetch`, `prefilter`, `classify`, `prices`, `evaluate`, `score`, `matrix`, `audit`,
   `pine`, `site`, `admin`, `models`); each has `if __name__ == "__main__"` and takes a `conn` from `db.connect()`.
-- **SQL is written in SQLite dialect everywhere**; `db._PgConnection.to_pg()` rewrites `?`, `INSERT OR IGNORE/REPLACE`,
-  `datetime('now')`, `instr()` for Postgres. New idioms must be portable or added to `to_pg` — no `sum(<bool expr>)`,
-  no `WHERE <int col>` without `=1`, no `PRAGMA`, no `sqlite_master` (use `db.tables/columns/primary_key`). Rows support
-  `r["col"]`, `r[0]`, `.keys()` on both backends; Postgres `Decimal` arrives as `float`.
+- **SQL is written in SQLite dialect everywhere** (so the in-memory test fixture runs it); `db._PgConnection.to_pg()`
+  rewrites `?`, `INSERT OR IGNORE/REPLACE`, `datetime('now')`, `instr()` for Postgres. New idioms must be portable or
+  added to `to_pg` — no `sum(<bool expr>)`, no `WHERE <int col>` without `=1`, no `PRAGMA`, no `sqlite_master` (use
+  `db.tables/columns/primary_key/unique_keys`). Rows support `r["col"]`, `r[0]`, `.keys()` on both backends;
+  Postgres `Decimal` arrives as `float`. Tweets are joined on `tweet_id`, never on `id`.
 - Logging is `db.log(msg)` (UTC-timestamped, stdout + `data/pipeline.log`, tailed live by the admin page) — not bare `print`.
 - Schema in `db.SCHEMA`; additive column migrations are entries in `db.MIGRATIONS` (applied on every `connect()` for
-  both backends). Destructive migrations go in `scripts/migrate_*.py`.
+  both backends); structural ones are `(name, fn)` entries in `db.STEPS`, idempotent, run once per Neon DB. Data
+  migrations (regrading etc.) stay in `scripts/migrate_*.py` and start with a `scripts/backup_db.py`.
 - Model is a first-class dimension: `calls` unique per `(tweet_id, asset, model)`, `trust` keyed by model, published model
   = `models.active_model()` (`FINCLATOR_ACTIVE_MODEL` → `FINCLATOR_MODEL` → Fable backfill tag). Never sum across models.
 - One classifier `SYSTEM` prompt in `src/classify.py` shared by every backend (Anthropic, Ollama native, OpenAI-compat).
@@ -98,5 +109,5 @@ Surfaces: **finclator.com** (public landing + method page, gated admin panel), `
 - `write_file` on an existing file is refused unless read in the same turn; `read_file` output is line-prefixed — never write it back.
 - Prompt-tuning the classifier: score a **held-out** frontier-labeled set (`data/labels_holdout.jsonl`), not only the tuning set.
 - Yahoo `query1.finance.yahoo.com/v8/finance/chart/<sym>` needs a browser UA; instruments are BTC-USD, `GC=F`, `^GSPC`.
-- `node_modules/`, `.vercel/`, `.env.local`, `data/finclator.db` are gitignored — keep them so (the DB was 82 MB in git).
+- `node_modules/`, `.vercel/`, `.env.local`, `data/backups/`, `*.dump` are gitignored — keep them so.
 - `vercel env add` needs one env per call and no output redirection around it; `--sensitive` is refused on `development`.

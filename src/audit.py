@@ -137,7 +137,7 @@ def body(conn, model: str | None = None, limit: int | None = None, account: str 
             SELECT c.id, c.handle, c.asset, c.direction, c.horizon, c.confidence, c.price_target, c.quote, c.called_at,
                    c.tweet_id, c.model, c.gate_p, t.text, t.assets_hint, o.entry_date, o.exit_date, o.entry_close,
                    o.exit_close, o.return_pct, o.threshold_pct, o.actual, o.result, o.target_hit, o.extreme
-            FROM calls c JOIN tweets t ON t.id = c.tweet_id LEFT JOIN outcomes o ON o.call_id = c.id
+            FROM calls c JOIN tweets t ON t.tweet_id=c.tweet_id LEFT JOIN outcomes o ON o.call_id = c.id
             WHERE c.id IN ({','.join('?' * len(chunk))})""", chunk).fetchall()
     rows.sort(key=lambda r: r["called_at"], reverse=True)
     flag_counts: dict[str, int] = {}   # over the rendered rows — the pills filter the rendered table
@@ -224,15 +224,15 @@ Flags are automatic review hints, not errors. Filters are kept in the URL — sh
     B.append("</tbody></table>")
 
     # ---- debug samples
-    rej = conn.execute("""SELECT handle, created_at, text, assets_hint, id FROM tweets WHERE relevant=1
-                          AND id IN (SELECT tweet_id FROM classified_by WHERE model=?)
-                          AND id NOT IN (SELECT tweet_id FROM calls WHERE model=?) ORDER BY random() LIMIT 40""",
+    rej = conn.execute("""SELECT handle, created_at, text, assets_hint, tweet_id AS id FROM tweets WHERE relevant=1
+                          AND tweet_id IN (SELECT tweet_id FROM classified_by WHERE model=?)
+                          AND tweet_id NOT IN (SELECT tweet_id FROM calls WHERE model=?) ORDER BY random() LIMIT 40""",
                        (model, model)).fetchall()
     B.append("<h2>Classifier said “not a call” <small>40 random asset-mentioning tweets the active model labeled not-a-call — look for missed calls</small></h2><table>")
     for r in rej:
         B.append(f"<tr><td style='white-space:nowrap'><a href='https://x.com/{r['handle']}/status/{r['id']}'>@{e(r['handle'])}</a><br><small>{r['created_at'][:10]} · {r['assets_hint']}</small></td><td class=tweet>{e(r['text'])}</td></tr>")
     B.append("</table>")
-    norel = conn.execute("SELECT handle, created_at, text, id FROM tweets WHERE relevant=0 ORDER BY random() LIMIT 40").fetchall()
+    norel = conn.execute("SELECT handle, created_at, text, tweet_id AS id FROM tweets WHERE relevant=0 ORDER BY random() LIMIT 40").fetchall()
     B.append("<h2>Prefilter dropped <small>40 random tweets that matched no asset regex — look for missed asset words</small></h2><table>")
     for r in norel:
         B.append(f"<tr><td style='white-space:nowrap'><a href='https://x.com/{r['handle']}/status/{r['id']}'>@{e(r['handle'])}</a><br><small>{r['created_at'][:10]}</small></td><td class=tweet>{e(r['text'])}</td></tr>")
@@ -249,7 +249,7 @@ Flags are automatic review hints, not errors. Filters are kept in the URL — sh
         c = conn.execute("""SELECT (SELECT count(*) FROM classified_by WHERE model=?) a, (SELECT count(*) FROM calls WHERE model=?) b,
                             (SELECT count(*) FROM outcomes o JOIN calls c ON c.id=o.call_id WHERE c.model=?) d,
                             (SELECT count(*) FROM tweets t WHERE t.relevant=1
-                               AND t.id NOT IN (SELECT tweet_id FROM classified_by WHERE model=?)) p""", (m, m, m, m)).fetchone()
+                               AND t.tweet_id NOT IN (SELECT tweet_id FROM classified_by WHERE model=?)) p""", (m, m, m, m)).fetchone()
         B.append(f"<tr><td>{e(m)}{' <b>(active)</b>' if m == model else ''}</td><td class=num>{c['a']:,}</td><td class=num>{c['p']:,}</td>"
                  f"<td class=num>{c['b']:,}</td><td class=num>{c['d']:,}</td></tr>")
     B.append("</table>")

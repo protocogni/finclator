@@ -25,7 +25,6 @@ from .models import active_model
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ("BTC", "GOLD", "SPX")
 HORIZONS = ("SHORT", "MEDIUM", "LONG")
-STATE_KEY = "daily_report"
 
 # Alarm thresholds (hours unless noted). The daily pipeline runs 06:00 America/New_York and takes ~1 h.
 MATRIX_STALE_H = 30          # matrix.json older than this → the daily job did not run / deploy
@@ -66,27 +65,24 @@ def fmt_age(h: float | None) -> str:
     return f"{h / 24:.1f} d"
 
 
-# ── state (previous run) lives in the DB so label deltas survive redeploys ────────────────────────────────────────
-def _ensure_state(conn) -> None:
-    conn.execute("CREATE TABLE IF NOT EXISTS report_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)")
-    conn.commit()
-
-
+# ── state (previous run) lives in the DB so label deltas survive redeploys: newest row of `reports` ────────────────
 def load_state(conn) -> dict:
-    _ensure_state(conn)
-    r = conn.execute("SELECT value FROM report_state WHERE key=?", (STATE_KEY,)).fetchone()
+    r = conn.execute("SELECT labels, at FROM reports ORDER BY id DESC LIMIT 1").fetchone()
+    if not r:
+        return {}
     try:
-        return json.loads(r[0]) if r else {}
+        return {"labels": json.loads(r[0]), "at": r[1]}
     except (ValueError, TypeError):
         return {}
 
 
-def save_state(conn, state: dict) -> None:
-    _ensure_state(conn)
-    conn.execute("INSERT INTO report_state(key, value, updated_at) VALUES (?, ?, datetime('now')) "
-                 "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at",
-                 (STATE_KEY, json.dumps(state)))
+def save_report(conn, now: datetime, subject: str, recips: list[str], sent, problems: list, labels: dict,
+                html: str) -> int:
+    conn.execute("INSERT INTO reports(at, subject, recipients, sent, problems, labels, html) VALUES (?,?,?,?,?,?,?)",
+                 (now.strftime("%Y-%m-%d %H:%M:%S"), subject, json.dumps(recips), json.dumps(sent, default=str),
+                  json.dumps(problems, default=str), json.dumps(labels), html))
     conn.commit()
+    return conn.execute("SELECT max(id) FROM reports").fetchone()[0]
 
 
 # ── data ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -106,7 +102,7 @@ def gather(conn, now: datetime | None = None, model: str | None = None, window_h
     f = _one(conn, """SELECT count(*) t, coalesce(sum(relevant),0) rel,
                         coalesce(sum(is_reply),0) replies,
                         coalesce(sum(CASE WHEN text LIKE 'RT @%' THEN 1 ELSE 0 END),0) rts,
-                        (SELECT count(*) FROM classified_by b JOIN tweets x ON x.id=b.tweet_id WHERE b.model=? AND x.relevant=1) cls,
+                        (SELECT count(*) FROM classified_by b JOIN tweets x ON x.tweet_id=b.tweet_id WHERE b.model=? AND x.relevant=1) cls,
                         (SELECT count(*) FROM calls WHERE model=?) calls,
                         (SELECT count(*) FROM outcomes o JOIN calls c ON c.id=o.call_id WHERE c.model=?) outs,
                         (SELECT count(*) FROM trust WHERE model=? AND asset='*' AND horizon='*') scored,
@@ -559,8 +555,9 @@ def _run(conn, dry: bool, now: datetime) -> dict:
         out["html"] = html
         return out
     out["sent"] = send_email(out["recipients"], subject, html) if out["recipients"] else {"skipped": "no recipients"}
-    save_state(conn, {"labels": {k: v["label"] for k, v in d["matrix"]["cells"].items()}, "at": now.isoformat()})
-    log(f"report: {subject} → {out['recipients']} {out['sent']}")
+    out["report_id"] = save_report(conn, now, subject, out["recipients"], out["sent"], P,
+                                   {k: v["label"] for k, v in d["matrix"]["cells"].items()}, html)
+    log(f"report: #{out['report_id']} {subject} → {out['recipients']} {out['sent']}")
     return out
 
 

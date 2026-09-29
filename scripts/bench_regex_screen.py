@@ -7,7 +7,7 @@ from src.db import connect
 
 gold_path = sys.argv[1] if len(sys.argv) > 1 else "data/labels_backfill.jsonl"
 gold = {json.loads(l)["id"]: json.loads(l) for l in open(gold_path)}
-rows = connect().execute("SELECT id, text FROM tweets WHERE id IN (%s)" % ",".join("?" * len(gold)), list(gold)).fetchall()
+rows = connect().execute("SELECT tweet_id AS id, text FROM tweets WHERE tweet_id IN (%s)" % ",".join("?" * len(gold)), list(gold)).fetchall()
 
 DIRECTIONAL = re.compile(r"""(
  bull|bear|long\b|short\b|buy|sell|hold|hodl|dip|rally|rip|moon|crash|dump|pump|breakout|breakdown|target|\btp\b|

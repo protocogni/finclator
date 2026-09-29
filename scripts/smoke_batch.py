@@ -11,7 +11,7 @@ from src.db import connect  # noqa: E402
 
 TAG = "smoke-batch"
 conn = connect()
-rows = conn.execute("SELECT id, handle, created_at, text, assets_hint FROM tweets WHERE relevant=1 "
+rows = conn.execute("SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets WHERE relevant=1 "
                     "ORDER BY created_at DESC LIMIT 8").fetchall()
 classify.pending = lambda c, limit, model: rows
 real_batch = classify.make_batch_classifier

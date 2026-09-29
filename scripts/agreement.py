@@ -17,7 +17,7 @@ for line in open(gold_path):
     r = json.loads(line)
     gold[r["id"]] = r
 conn = connect()
-rows = conn.execute("SELECT id, handle, created_at, text, assets_hint FROM tweets WHERE id IN (%s)" %
+rows = conn.execute("SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets WHERE tweet_id IN (%s)" %
                     ",".join("?" * len(gold)), list(gold)).fetchall()[:limit]
 run, model = make_classifier()
 print(f"model={model}  n={len(rows)}", flush=True)

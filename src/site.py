@@ -36,7 +36,7 @@ def build(conn: sqlite3.Connection, model: str | None = None) -> dict:
     # a real, verifiable, matured example with a stated target: the most recent CORRECT one with a short quote
     ex = q("""SELECT k.handle, k.asset, k.direction, k.horizon, substr(k.called_at,1,10) called, k.price_target, k.quote,
                      o.entry_date, o.exit_date, o.entry_close, o.exit_close, o.return_pct, o.threshold_pct, o.result, k.tweet_id
-              FROM calls k JOIN outcomes o ON o.call_id=k.id JOIN tweets t ON t.id=k.tweet_id
+              FROM calls k JOIN outcomes o ON o.call_id=k.id JOIN tweets t ON t.tweet_id=k.tweet_id
               WHERE k.model=? AND o.result='CORRECT' AND k.price_target IS NOT NULL AND length(k.quote) BETWEEN 30 AND 120
                 AND instr(t.text, k.quote) > 0 AND k.horizon='SHORT' AND k.quote LIKE '%$%' AND t.lang='en'
                 AND k.quote NOT LIKE '%above%' AND k.quote NOT LIKE '%below%' AND k.quote NOT LIKE '%hold%'

@@ -20,7 +20,7 @@ for line in open(gold_path):
     r = json.loads(line)
     gold[r["id"]] = r
 conn = connect()
-rows = conn.execute("SELECT id, handle, created_at, text, assets_hint FROM tweets WHERE id IN (%s) ORDER BY id" %
+rows = conn.execute("SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets WHERE tweet_id IN (%s) ORDER BY tweet_id" %
                     ",".join("?" * len(gold)), list(gold)).fetchall()[:limit]
 
 # warm-up: one call so model load / prefix cache is not in the timing

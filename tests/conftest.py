@@ -12,7 +12,7 @@ def conn():
     c.executescript("""
     INSERT INTO accounts(handle, school, active, sampling, rate_per_year) VALUES
       ('alice','Crypto',1,NULL,300), ('bob','Macro',1,'keyword',5000), ('carol','Quant',1,NULL,10);
-    INSERT INTO tweets(id, handle, created_at, text, source, assets_hint, relevant) VALUES
+    INSERT INTO tweets(tweet_id, handle, created_at, text, source, assets_hint, relevant) VALUES
       ('1','alice','2024-01-05T10:00:00+00:00','BTC to 100k this year','twitterapi','BTC',1),
       ('2','alice','2024-02-05T10:00:00+00:00','gold looks tired','twitterapi','GOLD',1),
       ('3','bob','2023-06-01T10:00:00+00:00','SPX bubble','twitterapi','SPX',1),

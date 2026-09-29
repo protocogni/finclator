@@ -161,7 +161,7 @@ if __name__ == "__main__":
         r = json.loads(line)
         gold[r["id"]] = r
     conn = connect()
-    rows = conn.execute("SELECT id, handle, created_at, text, assets_hint FROM tweets WHERE id IN (%s) ORDER BY id" %
+    rows = conn.execute("SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets WHERE tweet_id IN (%s) ORDER BY tweet_id" %
                         ",".join("?" * len(gold)), list(gold)).fetchall()[:limit]
     print(f"route={ROUTE} model={MODEL} gold={gold_path} n={len(rows)} "
           f"workers={os.environ.get('JEV_WORKERS', '2')}", flush=True)

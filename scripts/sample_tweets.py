@@ -35,7 +35,7 @@ for p in ("data/labels_backfill.jsonl", "data/labels_holdout.jsonl", *exclude_fi
     skip |= {json.loads(ln)["id"] for ln in open(p) if ln.strip()}
 
 conn = connect()
-rows = conn.execute("SELECT t.id, t.handle, t.created_at, t.assets_hint, t.text, a.language FROM tweets t "
+rows = conn.execute("SELECT t.tweet_id AS id, t.handle, t.created_at, t.assets_hint, t.text, a.language FROM tweets t "
                     "JOIN accounts a ON a.handle=t.handle WHERE t.relevant=1").fetchall()
 print("relevant originals:", len(rows), "| account language values:", Counter(r["language"] for r in rows).most_common(5))
 en = [r for r in rows if r["id"] not in skip and not is_tr(r["text"]) and (r["language"] or "en") != "tr"

@@ -15,7 +15,7 @@ limit = int(sys.argv[sys.argv.index("--n") + 1]) if "--n" in sys.argv else 10**9
 sizes = [int(a) for a in args] or [1, 4, 8, 12]
 gold = {json.loads(l)["id"]: json.loads(l) for l in open(gold_path)}
 conn = connect()
-rows = conn.execute("SELECT id, handle, created_at, text, assets_hint FROM tweets WHERE id IN (%s)" %
+rows = conn.execute("SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets WHERE tweet_id IN (%s)" %
                     ",".join("?" * len(gold)), list(gold)).fetchall()[:limit]
 single, model = classify.make_classifier()
 batch, _ = classify.make_batch_classifier()

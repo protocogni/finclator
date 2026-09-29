@@ -6,13 +6,13 @@ from src.models import active_model
 from src.prefilter import is_relevant
 
 conn = connect()
-rows = conn.execute("SELECT id, text, relevant, assets_hint FROM tweets").fetchall()
+rows = conn.execute("SELECT tweet_id AS id, text, relevant, assets_hint FROM tweets").fetchall()
 changed = newly = dropped = 0
 for r in rows:
     rel, assets = is_relevant(r["text"], False)
     hint = ",".join(assets)
     if int(rel) != r["relevant"] or hint != r["assets_hint"]:
-        conn.execute("UPDATE tweets SET relevant=?, assets_hint=? WHERE id=?", (int(rel), hint, r["id"]))
+        conn.execute("UPDATE tweets SET relevant=?, assets_hint=? WHERE tweet_id=?", (int(rel), hint, r["id"]))
         changed += 1
         if rel and not r["relevant"]:
             newly += 1

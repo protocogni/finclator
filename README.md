@@ -17,7 +17,7 @@ prices.py (Yahoo daily closes) ─► evaluate.py (vol-scaled threshold) ─► 
    ─► matrix.py ─► data/matrix.json
 ```
 
-Storage: `data/finclator.db` (SQLite, committed). One `python -m src.run` per week.
+Storage: Postgres (Neon) via `DATABASE_URL`. One `python -m src.run` per day (launchd).
 
 ## Setup
 

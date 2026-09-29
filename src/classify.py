@@ -130,8 +130,8 @@ THINK_PREDICT = int(os.environ.get("FINCLATOR_THINK_PREDICT", "1500"))  # num_pr
 def pending(conn: sqlite3.Connection, limit: int | None = None, model: str | None = None) -> list[sqlite3.Row]:
     """Relevant tweets not yet classified by `model`."""
     model = model or MODEL
-    q = """SELECT id, handle, created_at, text, assets_hint FROM tweets
-           WHERE relevant=1 AND id NOT IN (SELECT tweet_id FROM classified_by WHERE model=?)
+    q = """SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets
+           WHERE relevant=1 AND tweet_id NOT IN (SELECT tweet_id FROM classified_by WHERE model=?)
            ORDER BY created_at DESC"""  # newest first: a usable matrix + matured recent trust arrive early
     if limit:
         q += f" LIMIT {int(limit)}"
@@ -164,7 +164,7 @@ def store_result(conn: sqlite3.Connection, tweet: sqlite3.Row | dict, result: di
             )
             n += 1
     conn.execute("INSERT OR REPLACE INTO classified_by(tweet_id, model, at) VALUES(?,?,datetime('now'))", (tid, model))
-    conn.execute("UPDATE tweets SET classified=1 WHERE id=?", (tid,))
+    conn.execute("UPDATE tweets SET classified=1 WHERE tweet_id=?", (tid,))
     return n
 
 
@@ -429,7 +429,7 @@ def import_labels(conn: sqlite3.Connection, path: Path, model: str) -> tuple[int
         if not line.strip():
             continue
         r = json.loads(line)
-        t = conn.execute("SELECT id, handle, created_at FROM tweets WHERE id=?", (r["id"],)).fetchone()
+        t = conn.execute("SELECT tweet_id AS id, handle, created_at FROM tweets WHERE tweet_id=?", (r["id"],)).fetchone()
         if not t:
             continue
         calls_made += store_result(conn, t, r, model)

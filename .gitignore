@@ -107,7 +107,7 @@ data/*.out
 node_modules/
 .vercel/
 .env.local
-data/finclator.db
+data/backups/
 data/audit.html
 data/report.html
 data/agreement_*

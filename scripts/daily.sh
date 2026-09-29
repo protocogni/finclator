@@ -9,6 +9,7 @@ export PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
 export PYTHONPATH=. FINCLATOR_WORKERS=8 FINCLATOR_TERSE=1 FINCLATOR_BATCH_SIZE=4
 export FINCLATOR_MODEL_BASE_URL=http://localhost:11434/v1
 echo "== daily start $(date -u +%FT%TZ)"
+.venv/bin/python scripts/backup_db.py || echo "backup FAILED (continuing)"
 if ! curl -sf http://localhost:11434/api/tags >/dev/null; then
   echo "ollama not up — starting a transient server"
   OLLAMA_NUM_PARALLEL=8 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 nohup ollama serve >>data/ollama.log 2>&1 &

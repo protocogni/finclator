@@ -25,13 +25,13 @@ curl -H "Authorization: Bearer $CRON_SECRET" "https://finclator.com/panel/report
 `VERCEL_TEAM_ID`, `TWITTERAPI_IO_KEY` (balance), `RESEND_API_KEY` + `MAIL_FROM` (existing), recipients
 `OPS_REPORT_EMAIL` (comma-separated; fallback `OWNER_EMAIL`).
 
-**State:** previous matrix labels live in Neon table `report_state` (created on first run) so "was BUY" deltas survive
+**State:** every report is a row in Neon table `reports` (subject, recipients, delivery, problems, labels, html); the
+newest row's labels feed the "was BUY" deltas, so they survive
 redeploys. Dry runs do not touch it.
 
 **Pitfalls:**
 - Resend and api.vercel.com sit behind Cloudflare; a bare `urllib` request (no `User-Agent`) gets 403 `error code: 1010`.
   `_http_json` / `send_email` set one.
-- `INSERT OR REPLACE` only works for tables in `db.CONFLICT_KEYS`; `report_state` uses explicit `ON CONFLICT`.
 - A Neon pooler that drops the socket left psycopg blocked ~15 min; `db._PgConnection` now sets `connect_timeout` and
   TCP keepalives, and `report.run()` retries once on a fresh connection.
 - Tests: `tests/test_report.py` against the conftest SQLite fixture (network reads monkeypatched).

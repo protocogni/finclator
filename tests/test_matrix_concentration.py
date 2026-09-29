@@ -10,7 +10,7 @@ def _seed(conn, specs):
         conn.execute("INSERT INTO accounts(handle, school) VALUES(?, 'Macro')", (h,))
     for i, (h, d, conf, at) in enumerate(specs):
         tid = f"{h}{i}"
-        conn.execute("INSERT INTO tweets(id, handle, created_at, text, source) VALUES(?,?,?,?,?)", (tid, h, at, "x", "csv"))
+        conn.execute("INSERT INTO tweets(tweet_id, handle, created_at, text, source) VALUES(?,?,?,?,?)", (tid, h, at, "x", "csv"))
         conn.execute("INSERT INTO calls(tweet_id, handle, asset, direction, horizon, confidence, called_at, model) "
                      "VALUES(?,?,?,?,?,?,?,?)", (tid, h, "BTC", d, "SHORT", conf, at, "m"))
     conn.commit()

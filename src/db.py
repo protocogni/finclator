@@ -1,11 +1,14 @@
-"""Storage. Two backends behind one `connect()`:
-
-- SQLite (`data/finclator.db`) when `DATABASE_URL` is unset — the original single-file, zero-ops mode.
-- Postgres (Neon via Vercel) when `DATABASE_URL` is set — the hosted panel and the weekly run share one live DB.
+"""Storage. Postgres (Neon) is the source of truth — `DATABASE_URL` in the environment or `.env`.
 
 Every module writes SQLite-flavoured SQL; `_PgConnection` rewrites the small set of idioms that differ
 (`?` placeholders, `INSERT OR IGNORE/REPLACE`, `datetime('now')`, `instr()`, `random()`) so the query sites stay
 untouched. Rows behave like `sqlite3.Row` on both backends (index by position or name, `.keys()`).
+SQLite (`connect(url="")`) builds the same schema in a file or in memory — tests and offline tools only.
+
+Schema rules: every table has `id` (BIGINT identity on Postgres, rowid alias on SQLite) as its primary key; the
+natural key is a UNIQUE constraint (`INSERT OR IGNORE/REPLACE` conflicts resolve on it; see CONFLICT_KEYS); enums
+are CHECKed; every reference is a foreign key. Additive columns go in `MIGRATIONS` (applied on every connect),
+structural changes in `STEPS` (applied once on Postgres, recorded in `schema_migrations`).
 """
 from __future__ import annotations
 
@@ -14,8 +17,9 @@ import re
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "finclator.db"
-LOG_PATH = DB_PATH.parent / "pipeline.log"
+ROOT = Path(__file__).resolve().parent.parent
+DB_PATH = ROOT / "data" / "finclator.db"          # SQLite path for tests / offline tools only
+LOG_PATH = ROOT / "data" / "pipeline.log"
 
 
 def log(msg: str) -> None:
@@ -30,9 +34,27 @@ def log(msg: str) -> None:
     except OSError:
         pass  # read-only filesystem (hosted panel)
 
-SCHEMA = """
+
+ASSETS = ("BTC", "GOLD", "SPX")
+DIRECTIONS = ("BUY", "NEUTRAL", "SELL")
+HORIZONS = ("SHORT", "MEDIUM", "LONG")
+RESULTS = ("CORRECT", "PARTIAL", "WRONG")
+
+
+def _in(vals) -> str:
+    return "(" + ", ".join(f"'{v}'" for v in vals) + ")"
+
+
+SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    applied_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS accounts (
-    handle        TEXT PRIMARY KEY,           -- lowercase, no @
+    id            INTEGER PRIMARY KEY,
+    handle        TEXT NOT NULL UNIQUE,      -- lowercase, no @
     display_name  TEXT,
     school        TEXT NOT NULL,
     language      TEXT NOT NULL DEFAULT 'en',
@@ -45,7 +67,8 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 
 CREATE TABLE IF NOT EXISTS tweets (
-    id          TEXT PRIMARY KEY,             -- tweet id (string, exact)
+    id          INTEGER PRIMARY KEY,
+    tweet_id    TEXT NOT NULL UNIQUE,         -- X tweet id (string, exact); queries alias it `AS id` for consumers
     handle      TEXT NOT NULL REFERENCES accounts(handle),
     created_at  TEXT NOT NULL,                -- ISO-8601 UTC
     text        TEXT NOT NULL,
@@ -56,109 +79,154 @@ CREATE TABLE IF NOT EXISTS tweets (
     relevant    INTEGER NOT NULL DEFAULT 0,   -- prefilter passed → eligible for LLM
     classified  INTEGER NOT NULL DEFAULT 0    -- legacy flag; per-model state lives in classified_by
 );
-CREATE TABLE IF NOT EXISTS classified_by (
-    tweet_id TEXT NOT NULL REFERENCES tweets(id),
-    model    TEXT NOT NULL,
-    at       TEXT,
-    PRIMARY KEY (tweet_id, model)
-);
 CREATE INDEX IF NOT EXISTS ix_tweets_handle_created ON tweets(handle, created_at);
 CREATE INDEX IF NOT EXISTS ix_tweets_pending ON tweets(relevant, classified);
+CREATE INDEX IF NOT EXISTS ix_tweets_created ON tweets(created_at);
+
+CREATE TABLE IF NOT EXISTS classified_by (
+    id       INTEGER PRIMARY KEY,
+    tweet_id TEXT NOT NULL REFERENCES tweets(tweet_id),
+    model    TEXT NOT NULL,
+    at       TEXT,
+    UNIQUE(tweet_id, model)
+);
+CREATE INDEX IF NOT EXISTS ix_classified_by_model ON classified_by(model, tweet_id);
 
 -- Stage 2a: Jev decision-model gate, one row per (tweet, Jev version). p_call = calibrated is_call probability,
--- stances = JSON {asset: none|up|down|neutral}. The hybrid classifier sends only passing tweets to the text model.
+-- stances = JSON {{asset: none|up|down|neutral}}. The hybrid classifier sends only passing tweets to the text model.
 CREATE TABLE IF NOT EXISTS gate (
-    tweet_id TEXT NOT NULL REFERENCES tweets(id),
+    id       INTEGER PRIMARY KEY,
+    tweet_id TEXT NOT NULL REFERENCES tweets(tweet_id),
     model    TEXT NOT NULL,
     p_call   REAL NOT NULL,
     stances  TEXT,
     at       TEXT,
-    PRIMARY KEY (tweet_id, model)
+    UNIQUE(tweet_id, model)
 );
 
--- One row per (tweet, asset) explicit directional call. Non-calls are not stored here.
+-- One row per (tweet, asset, model) explicit directional call. Non-calls are not stored here.
 CREATE TABLE IF NOT EXISTS calls (
     id          INTEGER PRIMARY KEY,
-    tweet_id    TEXT NOT NULL REFERENCES tweets(id),
-    handle      TEXT NOT NULL,
-    asset       TEXT NOT NULL,                -- BTC | GOLD | SPX
-    direction   TEXT NOT NULL,                -- BUY | NEUTRAL | SELL
-    horizon     TEXT NOT NULL,                -- SHORT | MEDIUM | LONG
+    tweet_id    TEXT NOT NULL REFERENCES tweets(tweet_id),
+    handle      TEXT NOT NULL REFERENCES accounts(handle),
+    asset       TEXT NOT NULL CHECK (asset IN {_in(ASSETS)}),
+    direction   TEXT NOT NULL CHECK (direction IN {_in(DIRECTIONS)}),
+    horizon     TEXT NOT NULL CHECK (horizon IN {_in(HORIZONS)}),
     confidence  REAL NOT NULL,
     price_target REAL,                        -- explicit level if stated (same units as prices table)
     quote       TEXT,                         -- exact span justifying the label (audit trail)
     called_at   TEXT NOT NULL,                -- = tweet created_at
     model       TEXT NOT NULL,               -- classifier that produced this call; every downstream table is per-model
+    gate_p      REAL,                         -- Jev p_call when the gate ran (NULL before the gate existed)
     UNIQUE(tweet_id, asset, model)
 );
 CREATE INDEX IF NOT EXISTS ix_calls_cell ON calls(model, asset, horizon, called_at);
+CREATE INDEX IF NOT EXISTS ix_calls_handle ON calls(handle, model);
 
 CREATE TABLE IF NOT EXISTS prices (
-    asset  TEXT NOT NULL,
+    id     INTEGER PRIMARY KEY,
+    asset  TEXT NOT NULL CHECK (asset IN {_in(ASSETS)}),
     date   TEXT NOT NULL,                     -- YYYY-MM-DD
     close  REAL NOT NULL,
-    PRIMARY KEY (asset, date)
+    UNIQUE(asset, date)
 );
 
 -- Filled by evaluate.py once a call's horizon has matured.
 CREATE TABLE IF NOT EXISTS outcomes (
-    call_id      INTEGER PRIMARY KEY REFERENCES calls(id),
+    id           INTEGER PRIMARY KEY,
+    call_id      INTEGER NOT NULL UNIQUE REFERENCES calls(id),
     entry_date   TEXT NOT NULL,
     exit_date    TEXT NOT NULL,
     entry_close  REAL NOT NULL,
     exit_close   REAL NOT NULL,
     return_pct   REAL NOT NULL,
     threshold_pct REAL NOT NULL,              -- vol-scaled band used for NEUTRAL
-    actual       TEXT NOT NULL,               -- BUY | NEUTRAL | SELL (what the market did)
-    result       TEXT NOT NULL,               -- CORRECT | WRONG | PARTIAL  (direction)
+    actual       TEXT NOT NULL CHECK (actual IN {_in(DIRECTIONS)}),   -- what the market did
+    result       TEXT NOT NULL CHECK (result IN {_in(RESULTS)}),      -- direction outcome
     target_hit   INTEGER,                     -- 1 if price_target was touched within the horizon, 0 if not, NULL n/a
     extreme      REAL,                        -- max close (BUY) / min close (SELL) within horizon
     evaluated_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS ix_outcomes_exit ON outcomes(exit_date);
 
 CREATE TABLE IF NOT EXISTS trust (
+    id          INTEGER PRIMARY KEY,
     model       TEXT NOT NULL,
-    handle      TEXT NOT NULL,
-    asset       TEXT NOT NULL,                -- or '*' for overall
-    horizon     TEXT NOT NULL,                -- or '*' for overall
+    handle      TEXT NOT NULL REFERENCES accounts(handle),
+    asset       TEXT NOT NULL CHECK (asset IN {_in(ASSETS + ('*',))}),      -- '*' = overall
+    horizon     TEXT NOT NULL CHECK (horizon IN {_in(HORIZONS + ('*',))}),  -- '*' = overall
     n           INTEGER NOT NULL,
     correct     REAL NOT NULL,                -- CORRECT=1, PARTIAL=0.5
     score       REAL NOT NULL,                -- shrunk toward 0.5
     computed_at TEXT NOT NULL,
-    PRIMARY KEY (model, handle, asset, horizon)
+    UNIQUE(model, handle, asset, horizon)
 );
 
--- Influencer link clicks on the panel and the public site (which accounts people look at). Written by
--- admin.record_click via /api/click; `who` = signed-in panel email or NULL for an anonymous visitor.
+-- Every click on finclator.com and the panel (JS beacon → /api/click → admin.record_click). `kind` = influencer
+-- (an x.com link to a roster account, `handle` set) | link | button; `who` = signed-in panel email or NULL;
+-- `visitor` = random per-browser id (localStorage) so anonymous visitors can be counted without cookies.
 CREATE TABLE IF NOT EXISTS clicks (
     id          INTEGER PRIMARY KEY,
     at          TEXT NOT NULL,                -- YYYY-MM-DD HH:MM:SS UTC
-    handle      TEXT NOT NULL,
+    kind        TEXT,                         -- influencer | link | button
+    handle      TEXT REFERENCES accounts(handle),
+    href        TEXT,                         -- target of the link (clipped)
+    label       TEXT,                         -- visible text of the element (clipped)
     src         TEXT,                         -- tab / page that carried the link: accounts, matrix, audit, site…
     page        TEXT,                         -- path the click happened on
-    who         TEXT                          -- panel email or NULL
+    who         TEXT,                         -- panel email or NULL
+    visitor     TEXT                          -- anonymous per-browser id or NULL
 );
 CREATE INDEX IF NOT EXISTS ix_clicks_at ON clicks(at);
+CREATE INDEX IF NOT EXISTS ix_clicks_handle ON clicks(handle, at);
+
+-- One row per `src.run` (the daily pipeline): status + per-stage results as JSON.
+CREATE TABLE IF NOT EXISTS runs (
+    id          INTEGER PRIMARY KEY,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    status      TEXT NOT NULL,                -- running | ok | failed
+    stages      TEXT NOT NULL DEFAULT '{{}}', -- JSON {{stage: {{at, result}}}} in execution order
+    error       TEXT,
+    host        TEXT,
+    args        TEXT                          -- JSON: flags the run was started with
+);
+
+-- One row per daily ops report (src/report.py); the newest row's labels feed tomorrow's "was BUY" delta.
+CREATE TABLE IF NOT EXISTS reports (
+    id          INTEGER PRIMARY KEY,
+    at          TEXT NOT NULL,
+    subject     TEXT NOT NULL,
+    recipients  TEXT,                         -- JSON list
+    sent        TEXT,                         -- JSON: mail API response
+    problems    TEXT,                         -- JSON list
+    labels      TEXT NOT NULL,                -- JSON {{cell: label}}
+    html        TEXT                          -- the rendered email
+);
 """
 
-# Tables in FK order (migration + schema listing) and their conflict keys (for INSERT OR REPLACE → ON CONFLICT).
-TABLES = ["accounts", "tweets", "classified_by", "gate", "calls", "prices", "outcomes", "trust", "clicks"]
+# Tables in FK order and their natural (conflict) keys — INSERT OR REPLACE → ON CONFLICT (…) DO UPDATE.
+TABLES = ["accounts", "tweets", "classified_by", "gate", "calls", "prices", "outcomes", "trust", "clicks", "runs",
+          "reports"]
 CONFLICT_KEYS = {
-    "accounts": ("handle",), "tweets": ("id",), "classified_by": ("tweet_id", "model"), "gate": ("tweet_id", "model"),
-    "calls": ("tweet_id", "asset", "model"), "prices": ("asset", "date"), "outcomes": ("call_id",),
-    "trust": ("model", "handle", "asset", "horizon"),
+    "accounts": ("handle",), "tweets": ("tweet_id",), "classified_by": ("tweet_id", "model"),
+    "gate": ("tweet_id", "model"), "calls": ("tweet_id", "asset", "model"), "prices": ("asset", "date"),
+    "outcomes": ("call_id",), "trust": ("model", "handle", "asset", "horizon"), "schema_migrations": ("name",),
 }
+# Additive columns (applied on every connect, both backends).
 MIGRATIONS = (("accounts", "rate_per_year", "INTEGER"), ("accounts", "sampling", "TEXT"), ("accounts", "tier", "TEXT"),
               ("accounts", "last_fetch_at", "TEXT"),
               ("calls", "price_target", "REAL"), ("calls", "gate_p", "REAL"),
-              ("outcomes", "target_hit", "INTEGER"), ("outcomes", "extreme", "REAL"))
+              ("outcomes", "target_hit", "INTEGER"), ("outcomes", "extreme", "REAL"),
+              ("clicks", "kind", "TEXT"), ("clicks", "href", "TEXT"), ("clicks", "label", "TEXT"),
+              ("clicks", "visitor", "TEXT"))
 
 
 def database_url() -> str | None:
     url = os.environ.get("DATABASE_URL")
     if url:
         return url
-    p = DB_PATH.parent.parent / ".env"
+    p = ROOT / ".env"
     if p.exists():
         for ln in p.read_text().splitlines():
             if ln.startswith("DATABASE_URL="):
@@ -296,15 +364,23 @@ class _PgConnection:
         (self.rollback if exc[0] else self.commit)()
 
 
+_RE_ID_PK = re.compile(r"\bid\s+INTEGER PRIMARY KEY\b")
+_PG_ID = "id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY"
+
+
 def pg_schema() -> str:
     """SCHEMA translated for Postgres: identity ids, float8 instead of float4."""
-    s = SCHEMA.replace("id          INTEGER PRIMARY KEY,", "id          BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,")
+    s = _RE_ID_PK.sub(_PG_ID, SCHEMA)
     s = re.sub(r"\bREAL\b", "DOUBLE PRECISION", s)
     return s
 
 
+def _is_pg(conn) -> bool:
+    return getattr(conn, "backend", "sqlite") == "postgres"
+
+
 def columns(conn, table: str) -> list[str]:
-    if getattr(conn, "backend", "sqlite") == "postgres":
+    if _is_pg(conn):
         return [r[0] for r in conn.execute(
             "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=? "
             "ORDER BY ordinal_position", (table,))]
@@ -312,15 +388,39 @@ def columns(conn, table: str) -> list[str]:
 
 
 def primary_key(conn, table: str) -> set[str]:
-    if getattr(conn, "backend", "sqlite") == "postgres":
-        return set(CONFLICT_KEYS.get(table, ()))
+    """Primary-key columns, read from the catalog (not from code)."""
+    if _is_pg(conn):
+        return {r[0] for r in conn.execute(
+            """SELECT k.column_name FROM information_schema.table_constraints c
+               JOIN information_schema.key_column_usage k ON k.constraint_name=c.constraint_name AND k.table_name=c.table_name
+               WHERE c.table_schema='public' AND c.table_name=? AND c.constraint_type='PRIMARY KEY'""", (table,))}
     return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})") if r["pk"]}
 
 
+def unique_keys(conn, table: str) -> list[tuple[str, ...]]:
+    """Natural keys: every UNIQUE constraint on the table (the primary key excluded)."""
+    if _is_pg(conn):
+        rows = conn.execute(
+            """SELECT c.constraint_name, k.column_name FROM information_schema.table_constraints c
+               JOIN information_schema.key_column_usage k ON k.constraint_name=c.constraint_name AND k.table_name=c.table_name
+               WHERE c.table_schema='public' AND c.table_name=? AND c.constraint_type='UNIQUE'
+               ORDER BY c.constraint_name, k.ordinal_position""", (table,)).fetchall()
+        by_name: dict[str, list[str]] = {}
+        for r in rows:
+            by_name.setdefault(r[0], []).append(r[1])
+        return [tuple(v) for v in by_name.values()]
+    out: list[tuple[str, ...]] = []
+    for ix in conn.execute(f"PRAGMA index_list({table})"):
+        if ix["unique"] and ix["origin"] == "u":
+            out.append(tuple(r["name"] for r in conn.execute(f"PRAGMA index_info({ix['name']})")))
+    return out
+
+
 def tables(conn) -> list[str]:
-    if getattr(conn, "backend", "sqlite") == "postgres":
+    if _is_pg(conn):
         return [r[0] for r in conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY 1")]
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' "
+            "ORDER BY 1")]
     return [r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")]
 
@@ -328,17 +428,118 @@ def tables(conn) -> list[str]:
 def _migrate(conn) -> None:
     for table, col, typ in MIGRATIONS:
         if col not in columns(conn, table):
-            if getattr(conn, "backend", "sqlite") == "postgres" and typ == "REAL":
+            if _is_pg(conn) and typ == "REAL":
                 typ = "DOUBLE PRECISION"
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
     conn.commit()
 
 
+# ── structural migrations (Postgres only; each step is idempotent and recorded in schema_migrations) ─────────────
+def _pg_constraints(conn, table: str, ctype: str) -> list[str]:
+    return [r[0] for r in conn.execute(
+        "SELECT conname FROM pg_constraint WHERE conrelid=?::regclass AND contype=?", (table, ctype))]
+
+
+def _step_surrogate_ids(conn) -> None:
+    """Every table: `id` identity PK, the old PK becomes a UNIQUE constraint, FKs re-pointed. tweets.id → tweet_id."""
+    have = set(tables(conn))
+    if "tweets" in have and "tweet_id" not in columns(conn, "tweets"):
+        conn.execute("ALTER TABLE tweets RENAME COLUMN id TO tweet_id")
+    for t in ("tweets", "classified_by", "gate", "calls", "outcomes", "trust", "clicks"):   # FKs recreated below
+        if t in have:
+            for c in _pg_constraints(conn, t, "f"):
+                conn.execute(f"ALTER TABLE {t} DROP CONSTRAINT {c}")
+    natural = {"accounts": "handle", "tweets": "tweet_id", "classified_by": "tweet_id, model", "gate": "tweet_id, model",
+               "prices": "asset, date", "outcomes": "call_id", "trust": "model, handle, asset, horizon"}
+    for t, key in natural.items():
+        if t not in have or "id" in columns(conn, t):
+            continue
+        for c in _pg_constraints(conn, t, "p"):
+            conn.execute(f"ALTER TABLE {t} DROP CONSTRAINT {c}")
+        conn.execute(f"ALTER TABLE {t} ADD CONSTRAINT {t}_{key.replace(', ', '_')}_key UNIQUE ({key})")
+        conn.execute(f"ALTER TABLE {t} ADD COLUMN {_PG_ID}")
+    fks = [("tweets", "handle", "accounts(handle)"), ("classified_by", "tweet_id", "tweets(tweet_id)"),
+           ("gate", "tweet_id", "tweets(tweet_id)"), ("calls", "tweet_id", "tweets(tweet_id)"),
+           ("calls", "handle", "accounts(handle)"), ("outcomes", "call_id", "calls(id)"),
+           ("trust", "handle", "accounts(handle)")]
+    for t, col, ref in fks:
+        if t in have:
+            conn.execute(f"ALTER TABLE {t} ADD CONSTRAINT {t}_{col}_fkey FOREIGN KEY ({col}) REFERENCES {ref}")
+
+
+def _step_checks(conn) -> None:
+    have = set(tables(conn))
+    checks = [("calls", "asset", ASSETS), ("calls", "direction", DIRECTIONS), ("calls", "horizon", HORIZONS),
+              ("prices", "asset", ASSETS), ("outcomes", "actual", DIRECTIONS), ("outcomes", "result", RESULTS),
+              ("trust", "asset", ASSETS + ("*",)), ("trust", "horizon", HORIZONS + ("*",))]
+    for t, col, vals in checks:
+        name = f"{t}_{col}_check"
+        if t in have and name not in _pg_constraints(conn, t, "c"):
+            conn.execute(f"ALTER TABLE {t} ADD CONSTRAINT {name} CHECK ({col} IN {_in(vals)})")
+
+
+def _step_clicks_v2(conn) -> None:
+    """clicks: handle nullable (non-influencer clicks) + FK + new columns; report_state → reports."""
+    have = set(tables(conn))
+    if "clicks" in have:
+        for col, typ in (("kind", "TEXT"), ("href", "TEXT"), ("label", "TEXT"), ("visitor", "TEXT")):
+            if col not in columns(conn, "clicks"):
+                conn.execute(f"ALTER TABLE clicks ADD COLUMN {col} {typ}")
+        conn.execute("ALTER TABLE clicks ALTER COLUMN handle DROP NOT NULL")
+        if "clicks_handle_fkey" not in _pg_constraints(conn, "clicks", "f"):
+            conn.execute("ALTER TABLE clicks ADD CONSTRAINT clicks_handle_fkey FOREIGN KEY (handle) REFERENCES accounts(handle)")
+        conn.execute("UPDATE clicks SET kind='influencer' WHERE kind IS NULL AND handle IS NOT NULL")
+    if "report_state" in have:
+        import json
+        conn.executescript(_RE_ID_PK.sub(_PG_ID, _table_ddl("reports")))
+        for r in conn.execute("SELECT value, updated_at FROM report_state WHERE key='daily_report'").fetchall():
+            try:
+                st = json.loads(r[0])
+            except (ValueError, TypeError):
+                st = {}
+            conn.execute("INSERT INTO reports(at, subject, labels) VALUES (?, ?, ?)",
+                         ((st.get("at") or r[1] or "")[:19].replace("T", " "), "(migrated from report_state)",
+                          json.dumps(st.get("labels", {}))))
+        conn.execute("DROP TABLE report_state")
+
+
+STEPS = (("001_surrogate_ids", _step_surrogate_ids), ("002_checks", _step_checks), ("003_clicks_v2", _step_clicks_v2))
+
+
+def _table_ddl(table: str) -> str:
+    """The CREATE TABLE statement for one table, from SCHEMA."""
+    m = re.search(rf"CREATE TABLE IF NOT EXISTS {table} \(.*?\n\);", SCHEMA, re.S)
+    if not m:
+        raise KeyError(table)
+    return m.group(0)
+
+
+def _apply_steps(conn) -> list[str]:
+    """Run every STEPS entry not yet in schema_migrations, one transaction each. Returns the names applied."""
+    conn.executescript(_RE_ID_PK.sub(_PG_ID, _table_ddl("schema_migrations")))
+    done = {r[0] for r in conn.execute("SELECT name FROM schema_migrations")}
+    applied = []
+    for name, fn in STEPS:
+        if name in done:
+            continue
+        try:
+            fn(conn)
+            conn.execute("INSERT INTO schema_migrations(name, applied_at) VALUES (?, datetime('now'))", (name,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        applied.append(name)
+        log(f"db: applied {name}")
+    return applied
+
+
 def connect(path: Path = DB_PATH, url: str | None = None):
-    """Postgres when DATABASE_URL (env or .env) is set, else SQLite at `path`."""
+    """Postgres when DATABASE_URL (env or .env) is set, else SQLite at `path` (tests / offline tools)."""
     url = url if url is not None else database_url()
     if url:
         conn = _PgConnection(url)
+        _apply_steps(conn)
         conn.executescript(pg_schema())
         _migrate(conn)
         return conn
@@ -353,5 +554,5 @@ def connect(path: Path = DB_PATH, url: str | None = None):
 
 
 def connect_sqlite(path: Path = DB_PATH) -> sqlite3.Connection:
-    """Always the local SQLite file (migration source, offline tools)."""
+    """Always a local SQLite file (tests, offline tools) — never the production data."""
     return connect(path, url="")

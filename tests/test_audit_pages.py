@@ -3,7 +3,7 @@ from src import audit
 
 
 def test_audit_clamps_long_tweets(conn):
-    conn.execute("UPDATE tweets SET text=? WHERE id='3'", ("x " * 3000,))
+    conn.execute("UPDATE tweets SET text=? WHERE tweet_id='3'", ("x " * 3000,))
     conn.commit()
     html = audit.body(conn, model="m")
     assert html.count("class='tweet clamp'") == 1          # only the long one

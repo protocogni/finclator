@@ -200,7 +200,7 @@ if __name__ == "__main__":
 
     conn = connect()
     limit = int(sys.argv[1]) if len(sys.argv) > 1 else None
-    q = "SELECT id, handle, created_at, text, assets_hint FROM tweets WHERE relevant=1 AND id NOT IN (SELECT tweet_id FROM gate) ORDER BY created_at DESC"
+    q = "SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets WHERE relevant=1 AND tweet_id NOT IN (SELECT tweet_id FROM gate) ORDER BY created_at DESC"
     rows = conn.execute(q + (f" LIMIT {limit}" if limit else "")).fetchall()
     print(f"{len(rows)} relevant tweets without a gate row")
     ensure(conn, rows)

@@ -1,9 +1,8 @@
 """Vercel Python function: the admin panel behind the session cookie set by api/auth.js.
 
 Same HMAC scheme as auth.js (SESSION_SECRET over "session|email|exp", base64url payload "." signature). The DB is
-Postgres (Neon) via DATABASE_URL — the same one the weekly pipeline writes to — with the committed data/finclator.db
-as a fallback when DATABASE_URL is unset (copied to /tmp because SQLite needs a writable dir even for reads).
-Local-only widgets (process probes, live log, vendor balance, rebuild links) are neutralised in-process.
+Postgres (Neon) via DATABASE_URL — the same one the daily pipeline writes to. Local-only widgets (process probes,
+live log, vendor balance, rebuild links) are neutralised in-process.
 """
 from __future__ import annotations
 
@@ -12,8 +11,6 @@ import hashlib
 import hmac
 import json
 import os
-import shutil
-import sqlite3
 import time
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -23,24 +20,13 @@ ROOT = Path(__file__).resolve().parent.parent
 SECRET = os.environ.get("SESSION_SECRET", "")
 OWNER = os.environ.get("OWNER_EMAIL", "").lower()
 
+
 # ── DB ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-_DB_SRC = ROOT / "data" / "finclator.db"
-_DB_TMP = Path("/tmp") / "finclator.db"
-
-
-def _db_path() -> Path:
-    if not _DB_TMP.exists() or _DB_TMP.stat().st_size != _DB_SRC.stat().st_size:
-        shutil.copyfile(_DB_SRC, _DB_TMP)
-    return _DB_TMP
-
-
 def _connect():
-    if os.environ.get("DATABASE_URL"):
-        from src.db import connect
-        return connect()
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    return conn
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from src.db import connect
+    return connect()
 
 
 # ── session ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -193,7 +179,7 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel's Python runtime
         from src import admin  # noqa: PLC0415
         conn = _connect()
         try:
-            ok = admin.record_click(conn, body.get("handle", ""), body.get("src"), body.get("page"), email)
+            ok = admin.record_click_body(conn, body, email)
         finally:
             conn.close()
         self._send(200 if ok else 400, "application/json", json.dumps({"ok": ok}))

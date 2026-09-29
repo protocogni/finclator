@@ -14,7 +14,7 @@ tag = sys.argv[1]
 gold_path = sys.argv[sys.argv.index("--gold") + 1] if "--gold" in sys.argv else "data/labels_backfill.jsonl"
 limit = int(sys.argv[sys.argv.index("--n") + 1]) if "--n" in sys.argv else 10**9
 gold = {json.loads(l)["id"]: json.loads(l) for l in open(gold_path)}
-rows = connect().execute("SELECT id, handle, created_at, text, assets_hint FROM tweets WHERE id IN (%s)" %
+rows = connect().execute("SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets WHERE tweet_id IN (%s)" %
                          ",".join("?" * len(gold)), list(gold)).fetchall()[:limit]
 
 SCREEN = SYSTEM + """

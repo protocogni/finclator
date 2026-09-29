@@ -1,15 +1,15 @@
 {
- "generated_at": "2026-09-29T10:57+00:00",
+ "generated_at": "2026-09-29T21:17+00:00",
  "accounts": 98,
  "tweets": 156634,
  "from": "2017",
  "to": "2026-09-29",
- "calls": 11540,
- "outcomes": 7812,
+ "calls": 11558,
+ "outcomes": 7817,
  "results": {
-  "CORRECT": 3756,
+  "CORRECT": 3759,
   "PARTIAL": 2027,
-  "WRONG": 2029
+  "WRONG": 2031
  },
  "hit_by_horizon": {
   "MEDIUM": {
@@ -24,8 +24,8 @@
   },
   "SHORT": {
    "rate": 0.52,
-   "baseline": 0.621,
-   "n": 4331
+   "baseline": 0.62,
+   "n": 4336
   }
  },
  "scored_accounts": 40,

@@ -6,7 +6,7 @@ def _seed(conn):
     conn.execute("INSERT INTO accounts(handle, school) VALUES('a','Macro')")
     rows = [(1, "BUY", "BUY", "CORRECT"), (2, "SELL", "BUY", "WRONG"), (3, "BUY", "NEUTRAL", "PARTIAL"), (4, "SELL", "SELL", "CORRECT")]
     for cid, d, actual, res in rows:
-        conn.execute("INSERT INTO tweets(id, handle, created_at, text, source) VALUES(?,?,?,?,?)",
+        conn.execute("INSERT INTO tweets(tweet_id, handle, created_at, text, source) VALUES(?,?,?,?,?)",
                      (f"t{cid}", "a", "2025-01-01T00:00:00+00:00", "x", "csv"))
         conn.execute("INSERT INTO calls(id, tweet_id, handle, asset, direction, horizon, confidence, called_at, model) "
                      "VALUES(?,?,?,?,?,?,?,?,?)", (cid, f"t{cid}", "a", "BTC", d, "SHORT", 0.9, "2025-01-01T00:00:00+00:00", "m"))
