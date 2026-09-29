@@ -231,7 +231,10 @@ class _PgConnection:
 
     def __init__(self, url: str):
         import psycopg
-        self._c = psycopg.connect(url, row_factory=_row_factory, autocommit=False)
+        # connect_timeout + TCP keepalives: a Neon pooler that silently drops the socket otherwise leaves the client
+        # blocked in recv for the kernel's default (~15 min) before psycopg raises OperationalError.
+        self._c = psycopg.connect(url, row_factory=_row_factory, autocommit=False, connect_timeout=20,
+                                  keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3)
 
     # sqlite3 API surface used by the codebase
     def execute(self, sql: str, params=()):

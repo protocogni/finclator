@@ -139,6 +139,26 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel's Python runtime
     def log_message(self, format, *args):  # noqa: A002
         pass
 
+    def _report(self, q):
+        """/panel/report — daily ops email, fired by the Vercel cron (Authorization: Bearer CRON_SECRET).
+        `?dry=1` renders the HTML without sending or persisting state (same auth)."""
+        secret = os.environ.get("CRON_SECRET", "")
+        auth = self.headers.get("Authorization", "")
+        if not secret or not hmac.compare_digest(auth, f"Bearer {secret}"):
+            return self._send(401, "text/plain; charset=utf-8", "unauthorized")
+        import sys
+        sys.path.insert(0, str(ROOT))
+        from src import report  # noqa: PLC0415
+        dry = (q.get("dry") or ["0"])[0] == "1"
+        try:
+            out = report.run(dry=dry)
+        except Exception:  # noqa: BLE001
+            import traceback
+            return self._send(500, "text/plain; charset=utf-8", "report error\n\n" + traceback.format_exc())
+        if dry:
+            return self._send(200, "text/html; charset=utf-8", out["html"])
+        return self._send(200, "application/json", json.dumps(out, indent=1))
+
     def _send(self, code: int, ctype: str, body: str, extra: dict | None = None):
         b = body.encode()
         self.send_response(code)
@@ -157,6 +177,8 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel's Python runtime
         sub = (q.get("p") or [""])[0].strip("/")
         # pass the remaining query (minus p) to the page, e.g. tables?t=calls&o=200
         qs = "&".join(f"{k}={v}" for k, vs in q.items() if k != "p" for v in vs)
+        if sub == "report":
+            return self._report(q)
         _current_cookie = self.headers.get("Cookie", "")
         email = _session_email(_current_cookie)
         if not email:
