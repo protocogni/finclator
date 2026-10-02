@@ -123,7 +123,8 @@ def gather(conn, now: datetime | None = None, model: str | None = None, window_h
     act = {}
     for key, sql, col, s_now, s_prev in (
         ("tweets", "SELECT count(*) FROM tweets WHERE created_at >= ?", "created_at", since_iso, prev_iso),
-        ("gated", "SELECT count(*) FROM gate WHERE at >= ?", "at", since_sp, prev_sp),
+        ("gated", "SELECT count(*) FROM gate WHERE tweet_id IN (SELECT tweet_id FROM tweets WHERE relevant=1) "
+                  "AND at >= ?", "at", since_sp, prev_sp),
         ("classified", "SELECT count(*) FROM classified_by WHERE model=? AND at >= ?", "at", since_sp, prev_sp),
         ("calls", "SELECT count(*) FROM calls WHERE model=? AND called_at >= ?", "called_at", since_iso, prev_iso),
         ("outcomes", "SELECT count(*) FROM outcomes WHERE evaluated_at >= ?", "evaluated_at", since_iso, prev_iso),
@@ -132,8 +133,8 @@ def gather(conn, now: datetime | None = None, model: str | None = None, window_h
         cur = int(_one(conn, sql, *m, s_now)[0] or 0)
         prev = int(_one(conn, sql.replace(">= ?", f">= ? AND {col} < ?"), *m, s_prev, s_now)[0] or 0)
         act[key] = {"now": cur, "prev": prev}
-    act["gate_passed"] = int(_one(conn, "SELECT count(*) FROM gate WHERE at >= ? AND p_call >= ?", since_sp,
-                                  GATE_THRESHOLD)[0] or 0)
+    act["gate_passed"] = int(_one(conn, "SELECT count(*) FROM gate WHERE tweet_id IN (SELECT tweet_id FROM tweets "
+                                  "WHERE relevant=1) AND at >= ? AND p_call >= ?", since_sp, GATE_THRESHOLD)[0] or 0)
 
     prices = {}
     for a in ASSETS:

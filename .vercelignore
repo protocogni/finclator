@@ -14,3 +14,9 @@ tradingview
 *.md
 !public/**
 data/finclator.db
+data/backups
+data/*.dump
+data/*.db
+data/*.html
+data/*.csv
+marketing

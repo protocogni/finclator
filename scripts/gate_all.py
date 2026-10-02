@@ -19,9 +19,10 @@ def lang(text, acct_lang):
 
 
 if "--stats-only" not in sys.argv:
-    rows = conn.execute("SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets WHERE relevant=0 AND is_reply=0 "
+    # every original without a gate row: regex-rejected AND regex-accepted backlog (production only gated new tweets)
+    rows = conn.execute("SELECT tweet_id AS id, handle, created_at, text, assets_hint FROM tweets WHERE is_reply=0 "
                         "AND tweet_id NOT IN (SELECT tweet_id FROM gate) ORDER BY created_at DESC").fetchall()
-    log(f"gate_all: {len(rows):,} regex-rejected originals without a gate row")
+    log(f"gate_all: {len(rows):,} originals without a gate row")
     t0 = time.time()
     gate.ensure(conn, rows)
     log(f"gate_all: finished in {time.time() - t0:.0f}s")

@@ -250,8 +250,10 @@ def status(conn) -> dict:
     if recent and recent["n"] >= 20:
         span = (datetime.now(timezone.utc) - datetime.fromisoformat(recent["a"]).replace(tzinfo=timezone.utc)).total_seconds()
         rate = recent["n"] / span * 60 if span > 30 else None
-    g = _one(conn, """SELECT count(*) n, coalesce(sum(CASE WHEN p_call >= ? THEN 1 ELSE 0 END),0) p, max(model) m, max(at) at
-                      FROM gate""", GATE_THRESHOLD)
+    # production gate = rows on relevant tweets; probe rows on regex-rejected tweets (scripts/prefilter_learn.py) excluded
+    g = _one(conn, """SELECT count(*) n, coalesce(sum(CASE WHEN g.p_call >= ? THEN 1 ELSE 0 END),0) p, max(g.model) m,
+                             max(g.at) at
+                      FROM gate g JOIN tweets t ON t.tweet_id=g.tweet_id WHERE t.relevant=1""", GATE_THRESHOLD)
     pending = f["rel"] - f["cls"]
     prices = {r["asset"]: dict(r) for r in _q(conn, "SELECT asset, min(date) a, max(date) b, count(*) n FROM prices GROUP BY asset")}
     matrix_p = ROOT / "data" / "matrix.json"

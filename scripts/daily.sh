@@ -19,7 +19,7 @@ if ! .venv/bin/python -m src.run; then
   echo "== daily FAILED in src.run $(date -u +%FT%TZ)"; exit 1
 fi
 vercel deploy --prod --yes >>data/deploy.log 2>&1 && echo "deployed" || echo "deploy FAILED (see data/deploy.log)"
-git add data/matrix.json public/site.json tradingview/finclator.pine
+git add data/matrix.json public/site.json tradingview/finclator.pine data/prefilter_learned.json
 git commit -qm "daily: matrix + site.json $(date -u +%F)" || echo "nothing to commit"
 git pull -q --rebase --autostash origin main || echo "rebase FAILED — resolve by hand"
 git push -q origin main && echo "pushed" || echo "push failed"

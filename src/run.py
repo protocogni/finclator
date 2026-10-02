@@ -1,4 +1,4 @@
-"""Daily pipeline: fetch → classify → prices → evaluate → score → matrix → audit → pine → site.
+"""Daily pipeline: fetch → prefilter_learn → classify → prices → evaluate → score → matrix → audit → pine → site.
 
 Every run is a row in `runs` (started/finished, status, per-stage results as JSON) so the panel and the daily
 report can show what happened without reading the log file.
@@ -11,7 +11,7 @@ import sys
 import traceback
 from datetime import datetime, timezone
 
-from . import audit, classify, evaluate, fetch, matrix, pine, prices, score, site
+from . import audit, classify, evaluate, fetch, matrix, pine, prefilter_learn, prices, score, site
 from .db import connect, log
 
 
@@ -49,6 +49,12 @@ def main(skip_fetch: bool = False, skip_classify: bool = False) -> None:
         if not skip_fetch:
             run.stage("fetch", fetch.fetch_all(conn))
         if not skip_classify:
+            # probe regex-rejected tweets with the gate, rescue its passes, learn vocabulary from them (before classify,
+            # so rescued and retagged tweets are classified in this same run); a failure here never blocks the run
+            try:
+                run.stage("prefilter_learn", prefilter_learn.run(conn))
+            except Exception as e:  # noqa: BLE001
+                run.stage("prefilter_learn", f"skipped: {type(e).__name__}: {str(e)[:200]}")
             run.stage("classify", classify.classify_pending(conn))
         run.stage("prices", prices.update_prices(conn))
         run.stage("evaluate", evaluate.evaluate(conn))
