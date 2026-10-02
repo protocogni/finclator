@@ -1,0 +1,175 @@
+{
+ "terms": [
+  {
+   "term": "nothing stops",
+   "asset": "BTC",
+   "support": 28,
+   "neg": 18,
+   "rate": 0.609,
+   "lift": 47.5,
+   "handles": 4,
+   "score": 2.028,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "downhill",
+   "asset": "BTC",
+   "support": 33,
+   "neg": 40,
+   "rate": 0.452,
+   "lift": 35.3,
+   "handles": 2,
+   "score": 1.581,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "upwards",
+   "asset": "SPX",
+   "support": 12,
+   "neg": 19,
+   "rate": 0.387,
+   "lift": 30.2,
+   "handles": 2,
+   "score": 0.962,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "train",
+   "asset": "BTC",
+   "support": 37,
+   "neg": 117,
+   "rate": 0.24,
+   "lift": 18.7,
+   "handles": 7,
+   "score": 0.868,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "roll",
+   "asset": "BTC",
+   "support": 33,
+   "neg": 106,
+   "rate": 0.237,
+   "lift": 18.5,
+   "handles": 2,
+   "score": 0.83,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "stops",
+   "asset": "BTC",
+   "support": 31,
+   "neg": 102,
+   "rate": 0.233,
+   "lift": 18.2,
+   "handles": 7,
+   "score": 0.8,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "bigger",
+   "asset": "BTC",
+   "support": 39,
+   "neg": 260,
+   "rate": 0.13,
+   "lift": 10.2,
+   "handles": 7,
+   "score": 0.478,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "buy the",
+   "asset": "SPX",
+   "support": 8,
+   "neg": 37,
+   "rate": 0.178,
+   "lift": 13.9,
+   "handles": 6,
+   "score": 0.37,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "bounce",
+   "asset": "BTC",
+   "support": 10,
+   "neg": 54,
+   "rate": 0.156,
+   "lift": 12.2,
+   "handles": 7,
+   "score": 0.36,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "the cycle",
+   "asset": "BTC",
+   "support": 8,
+   "neg": 49,
+   "rate": 0.14,
+   "lift": 11.0,
+   "handles": 6,
+   "score": 0.292,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "pozitif",
+   "asset": "SPX",
+   "support": 9,
+   "neg": 70,
+   "rate": 0.114,
+   "lift": 8.9,
+   "handles": 3,
+   "score": 0.25,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "çıkar",
+   "asset": "BTC",
+   "support": 8,
+   "neg": 65,
+   "rate": 0.11,
+   "lift": 8.6,
+   "handles": 3,
+   "score": 0.228,
+   "added": "2026-10-02"
+  },
+  {
+   "term": "ride",
+   "asset": "BTC",
+   "support": 8,
+   "neg": 66,
+   "rate": 0.108,
+   "lift": 8.4,
+   "handles": 5,
+   "score": 0.225,
+   "added": "2026-10-02"
+  }
+ ],
+ "dropped": [],
+ "history": [
+  {
+   "at": "2026-10-02T10:26:57+00:00",
+   "probed": 180,
+   "passed": 3,
+   "learned": [
+    "nothing stops",
+    "downhill",
+    "upwards",
+    "train",
+    "roll",
+    "stops",
+    "bigger",
+    "buy the",
+    "bounce",
+    "the cycle",
+    "pozitif",
+    "çıkar",
+    "ride"
+   ],
+   "retagged": 21980,
+   "rescued": 938,
+   "recall_before": 0.9169,
+   "recall_after": 0.9276,
+   "gate_passes": 12947
+  }
+ ]
+}

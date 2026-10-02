@@ -1,36 +1,36 @@
 {
- "generated_at": "2026-09-29T21:17+00:00",
+ "generated_at": "2026-10-02T11:54+00:00",
  "accounts": 98,
- "tweets": 156634,
+ "tweets": 156914,
  "from": "2017",
- "to": "2026-09-29",
- "calls": 11558,
- "outcomes": 7817,
+ "to": "2026-10-02",
+ "calls": 13052,
+ "outcomes": 8907,
  "results": {
-  "CORRECT": 3759,
-  "PARTIAL": 2027,
-  "WRONG": 2031
+  "CORRECT": 4237,
+  "PARTIAL": 2276,
+  "WRONG": 2394
  },
  "hit_by_horizon": {
   "MEDIUM": {
-   "rate": 0.704,
-   "baseline": 0.809,
-   "n": 2144
+   "rate": 0.697,
+   "baseline": 0.814,
+   "n": 2468
   },
   "LONG": {
-   "rate": 0.755,
-   "baseline": 0.826,
-   "n": 1337
+   "rate": 0.758,
+   "baseline": 0.829,
+   "n": 1438
   },
   "SHORT": {
-   "rate": 0.52,
-   "baseline": 0.62,
-   "n": 4336
+   "rate": 0.513,
+   "baseline": 0.625,
+   "n": 5001
   }
  },
- "scored_accounts": 40,
+ "scored_accounts": 48,
  "trust_lo": 0.24,
- "trust_hi": 0.83,
+ "trust_hi": 0.85,
  "schools": [
   {
    "school": "Macro",
@@ -56,69 +56,69 @@
  "matrix": {
   "BTC:SHORT": {
    "label": "BUY",
-   "net": 0.462,
-   "n": 155,
-   "accounts": 29,
-   "top_share": 0.07
+   "net": 0.442,
+   "n": 166,
+   "accounts": 36,
+   "top_share": 0.046
   },
   "BTC:MEDIUM": {
    "label": "BUY",
-   "net": 0.738,
-   "n": 485,
-   "accounts": 40,
-   "top_share": 0.053
+   "net": 0.768,
+   "n": 531,
+   "accounts": 45,
+   "top_share": 0.045
   },
   "BTC:LONG": {
    "label": "BUY",
-   "net": 0.669,
-   "n": 1389,
-   "accounts": 51,
-   "top_share": 0.041
+   "net": 0.774,
+   "n": 1522,
+   "accounts": 55,
+   "top_share": 0.038
   },
   "GOLD:SHORT": {
    "label": "NEUTRAL",
-   "net": 0.098,
-   "n": 54,
+   "net": 0.002,
+   "n": 53,
    "accounts": 21,
-   "top_share": 0.1
+   "top_share": 0.093
   },
   "GOLD:MEDIUM": {
    "label": "BUY",
-   "net": 0.789,
-   "n": 297,
-   "accounts": 32,
-   "top_share": 0.079
+   "net": 0.785,
+   "n": 309,
+   "accounts": 36,
+   "top_share": 0.074
   },
   "GOLD:LONG": {
    "label": "BUY",
-   "net": 0.704,
-   "n": 892,
-   "accounts": 50,
+   "net": 0.722,
+   "n": 946,
+   "accounts": 51,
    "top_share": 0.05
   },
   "SPX:SHORT": {
-   "label": "SELL",
-   "net": -0.192,
-   "n": 57,
-   "accounts": 15,
-   "top_share": 0.137
+   "label": "NEUTRAL",
+   "net": 0.02,
+   "n": 76,
+   "accounts": 25,
+   "top_share": 0.09
   },
   "SPX:MEDIUM": {
    "label": "NEUTRAL",
-   "net": 0.026,
-   "n": 171,
-   "accounts": 36,
-   "top_share": 0.06
+   "net": 0.079,
+   "n": 240,
+   "accounts": 44,
+   "top_share": 0.05
   },
   "SPX:LONG": {
    "label": "BUY",
-   "net": 0.246,
-   "n": 250,
-   "accounts": 40,
-   "top_share": 0.058
+   "net": 0.281,
+   "n": 312,
+   "accounts": 48,
+   "top_share": 0.049
   }
  },
- "matrix_generated_at": "2026-09-29",
+ "matrix_generated_at": "2026-10-02",
  "example": {
   "handle": "tedpillows",
   "asset": "BTC",
